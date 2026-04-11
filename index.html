@@ -272,6 +272,7 @@ var S = {
   logs:[], genieText:'Initializing GENIE AI engine...', mode:'balanced',
   betHistory:[], betConviction:0, betStableDir:null, betStableCount:0,
   hist15m:[], ind15m:null,
+  _smoothScore:0, _lastCall:null, _callHoldTicks:0, _scoreHist:[],
   _lhp:0, _lktl:900, _chartDirty:true
 };
 var ws=null, wsRT=null;
@@ -704,7 +705,40 @@ function analyze(opts){
   // Price projection per mode
   var projPrice=traj?traj.proj+modePriceBias:null;
 
-  return{call:call,conf:modeConf,reason:reason,score:score,signals:signals,modeReason:modeReason,projPrice:projPrice,rawConf:rawConf}
+  // ===== SIGNAL STABILITY — prevent flip-flopping =====
+  // 1. Smooth the score: EMA over recent ticks to filter noise
+  S._scoreHist.push(score);
+  if(S._scoreHist.length>20)S._scoreHist.shift();
+  var alpha=0.25; // smoothing factor — lower = more stable
+  S._smoothScore=S._smoothScore*( 1-alpha)+score*alpha;
+  var smoothed=S._smoothScore;
+
+  // 2. Hysteresis: once committed, require 60% stronger opposing signal to flip
+  var hysteresis=1.6;
+  if(S._lastCall==='ABOVE'&&call==='BELOW'){
+    // Must exceed threshold by hysteresis multiplier to flip from ABOVE to BELOW
+    var flipThresh=(mode==='aggressive'?aThresh:mode==='safe'?sThresh:bThresh)*hysteresis;
+    if(Math.abs(smoothed)<flipThresh){call=S._lastCall;reason='Holding ABOVE — opposing signal insufficient to warrant reversal';modeConf=Math.max(modeConf-15,5)}
+  }else if(S._lastCall==='BELOW'&&call==='ABOVE'){
+    var flipThresh=(mode==='aggressive'?aThresh:mode==='safe'?sThresh:bThresh)*hysteresis;
+    if(Math.abs(smoothed)<flipThresh){call=S._lastCall;reason='Holding BELOW — opposing signal insufficient to warrant reversal';modeConf=Math.max(modeConf-15,5)}
+  }
+  // Don't flip from a direction to HOLD too easily either
+  if(S._lastCall&&S._lastCall!=='HOLD'&&call==='HOLD'&&S._callHoldTicks<10){
+    if(Math.abs(smoothed)>(mode==='aggressive'?aThresh*0.6:mode==='safe'?sThresh*0.6:bThresh*0.6)){
+      call=S._lastCall;reason='Maintaining '+S._lastCall+' — conviction still present';modeConf=Math.max(modeConf-10,5)
+    }
+  }
+
+  // 3. Commitment cooldown: after choosing direction, hold for minimum 8 ticks (~8 sec)
+  if(call===S._lastCall){S._callHoldTicks++}
+  else if(S._callHoldTicks<8&&S._lastCall&&S._lastCall!=='HOLD'){
+    call=S._lastCall;S._callHoldTicks++;
+    reason='Committed to '+call+' — holding position ('+S._callHoldTicks+'/8)'
+  }else{S._callHoldTicks=0}
+  S._lastCall=call;
+
+  return{call:call,conf:modeConf,reason:reason,score:smoothed,signals:signals,modeReason:modeReason,projPrice:projPrice,rawConf:rawConf}
 }
 
 /* ======== GENIE TEXT — QUANTITATIVE CRYPTO & PREDICTION MARKET AI ======== */
