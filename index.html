@@ -65,9 +65,12 @@ body{background:var(--bg);color:var(--t2);font-family:'Inter',-apple-system,Blin
 .sig.hold .sig-dir{color:var(--o);font-size:34px}
 .sig.scanning .sig-dir{color:var(--t3);font-size:28px}
 .sig-sub{font-size:11px;color:var(--t3);margin-top:8px;letter-spacing:.3px;line-height:1.5}
-.conf-row{display:flex;justify-content:space-between;font-size:10px;color:var(--t4);margin-top:14px}
-.conf-trk{background:#0a1218;border-radius:4px;height:6px;overflow:hidden;margin-top:4px}
-.conf-fill{height:100%;border-radius:4px;transition:width .6s ease,background .4s}
+.conf-row{display:flex;justify-content:space-between;align-items:baseline;font-size:10px;color:var(--t4);margin-top:16px}
+.conf-pct{font-size:28px;font-weight:900;font-variant-numeric:tabular-nums;letter-spacing:-1px;transition:color .4s}
+.conf-lbl{font-size:9px;font-weight:700;letter-spacing:.14em}
+.conf-trk{background:#0a1218;border-radius:5px;height:10px;overflow:hidden;margin-top:6px;position:relative}
+.conf-fill{height:100%;border-radius:5px;transition:width .6s ease,background .4s}
+.conf-trk::after{content:'';position:absolute;top:0;left:0;right:0;bottom:0;background:linear-gradient(90deg,transparent 0%,rgba(255,255,255,0.06) 50%,transparent 100%);pointer-events:none}
 
 /* Lock Banner */
 .lock{margin:0 10px;padding:10px 14px;border-radius:10px;text-align:center;font-size:11px;font-weight:700;letter-spacing:.06em;display:none;border:1px solid;transition:all .3s}
@@ -87,10 +90,17 @@ body{background:var(--bg);color:var(--t2);font-family:'Inter',-apple-system,Blin
 .mode-btn.active{border-color:var(--b);color:var(--b);background:#00d4ff10}
 .mode-btn[data-m="safe"].active{border-color:var(--g);color:var(--g);background:#00ff8810}
 .mode-btn[data-m="aggressive"].active{border-color:var(--o);color:var(--o);background:#ff950010}
-.bet-sug{margin-top:12px;padding:12px;border-radius:10px;background:var(--cd);border:1px solid var(--bd);text-align:center}
+.bet-sug{margin-top:12px;padding:14px;border-radius:10px;background:var(--cd);border:1px solid var(--bd);text-align:center}
 .bet-lbl{font-size:8px;font-weight:700;letter-spacing:.14em;color:var(--t4);margin-bottom:4px}
-.bet-amt{font-size:26px;font-weight:900;color:var(--b);font-variant-numeric:tabular-nums;transition:color .3s}
-.bet-note{font-size:9px;color:var(--t4);margin-top:4px}
+.bet-dir{font-size:11px;font-weight:800;letter-spacing:.1em;margin-bottom:6px;transition:color .3s}
+.bet-amt{font-size:28px;font-weight:900;color:var(--b);font-variant-numeric:tabular-nums;transition:color .3s}
+.bet-note{font-size:9px;color:var(--t4);margin-top:5px;line-height:1.5}
+.bet-conv{margin-top:8px;display:flex;gap:3px;justify-content:center;align-items:center}
+.bet-conv-dot{width:8px;height:8px;border-radius:50%;background:var(--bd);transition:background .4s,box-shadow .4s}
+.bet-conv-dot.on{background:var(--b);box-shadow:0 0 6px var(--b)}
+.bet-conv-dot.up{background:var(--g);box-shadow:0 0 6px var(--g)}
+.bet-conv-dot.dn{background:var(--r);box-shadow:0 0 6px var(--r)}
+.bet-conv-lbl{font-size:7px;font-weight:700;letter-spacing:.1em;color:var(--t4);margin-left:6px}
 
 /* Lock Inner (inside signal card) */
 .lock-inner{margin-top:14px;padding:10px 12px;border-radius:8px;font-size:10px;font-weight:700;letter-spacing:.06em;display:none;border:1px solid var(--bd);background:var(--cd);color:var(--t3);transition:all .4s}
@@ -178,7 +188,7 @@ body{background:var(--bg);color:var(--t2);font-family:'Inter',-apple-system,Blin
   <div class="sig-lbl">GENIE AI — ELITE SIGNAL ENGINE</div>
   <div class="sig-dir" id="sigDir">ANALYZING</div>
   <div class="sig-sub" id="sigSub">Collecting market intelligence...</div>
-  <div class="conf-row"><span>CONFIDENCE</span><span id="confPct">--%</span></div>
+  <div class="conf-row"><span class="conf-lbl">CONFIDENCE</span><span class="conf-pct" id="confPct">--%</span></div>
   <div class="conf-trk"><div class="conf-fill" id="confFill" style="width:0%"></div></div>
   <div class="lock-inner" id="lockInner"></div>
 </div>
@@ -203,8 +213,10 @@ body{background:var(--bg);color:var(--t2);font-family:'Inter',-apple-system,Blin
   </div>
   <div class="bet-sug" id="betSug">
     <div class="bet-lbl">GENIE SUGGESTS</div>
+    <div class="bet-dir" id="betDir">WAITING FOR DATA</div>
     <div class="bet-amt" id="betAmt">$--</div>
     <div class="bet-note" id="betNote">Set bankroll to receive AI bet sizing</div>
+    <div class="bet-conv" id="betConv"></div>
   </div>
 </div>
 
@@ -258,6 +270,7 @@ var S = {
   analysis:null, traj:null,
   lockDir:null, lockConf:0, lockTime:null, lockSamples:[],
   logs:[], genieText:'Initializing GENIE AI engine...', mode:'balanced',
+  betHistory:[], betConviction:0, betStableDir:null, betStableCount:0,
   _lhp:0, _lktl:900, _chartDirty:true
 };
 var ws=null, wsRT=null;
@@ -862,13 +875,17 @@ function render(){
     $('sigCard').className='sig '+cls;
     $('sigDir').textContent=a.call==='ABOVE'?'ABOVE \u2191':a.call==='BELOW'?'BELOW \u2193':S.hist.length<26?'ANALYZING':'HOLD';
     $('sigSub').textContent=a.reason;
-    $('confPct').textContent=a.conf+'%';
+    // Big visible confidence
+    var cpEl=$('confPct');
+    cpEl.textContent=a.conf+'%';
+    cpEl.style.color=a.conf>=60?(a.call==='ABOVE'?CL.g:a.call==='BELOW'?CL.r:CL.o):a.conf>=35?CL.y:CL.t3;
     $('confFill').style.width=a.conf+'%';
     $('confFill').style.background=a.call==='ABOVE'?CL.g:a.call==='BELOW'?CL.r:CL.o;
   }else if(S.hist.length<26){
     $('sigCard').className='sig scanning';
     $('sigDir').textContent='ANALYZING';
     $('sigSub').textContent='Collecting data... '+S.hist.length+'/26 samples needed';
+    $('confPct').textContent='--%';$('confPct').style.color=CL.t3;
   }
 
   // Lock inner status (inside signal card)
@@ -891,18 +908,78 @@ function render(){
     lb.textContent='\uD83D\uDD12 LOCKED: '+S.lockDir+' \u2014 '+S.lockConf+'% avg confidence \u2014 Holding firm ('+S.lockTime+')'
   }else{lb.className='lock'}
 
-  // Bet sizing — mode-adaptive
+  // Conviction tracking — patient, gradual build-up
+  var curDir=a?a.call:null;
+  if(curDir&&curDir!=='HOLD'){
+    S.betHistory.push({dir:curDir,conf:a.conf,t:Date.now()});
+    if(S.betHistory.length>30)S.betHistory.shift();
+    if(curDir===S.betStableDir){S.betStableCount++}
+    else{S.betStableDir=curDir;S.betStableCount=1;S.betConviction=0}
+    // Conviction ramps: need consecutive same-direction signals with decent confidence
+    var avgC=0,n=Math.min(S.betHistory.length,8);
+    for(var ci=S.betHistory.length-n;ci<S.betHistory.length;ci++)avgC+=S.betHistory[ci].conf;
+    avgC=n>0?avgC/n:0;
+    // Conviction 0-5: based on stability count + avg confidence
+    if(S.betStableCount>=8&&avgC>=55)S.betConviction=5;
+    else if(S.betStableCount>=6&&avgC>=45)S.betConviction=4;
+    else if(S.betStableCount>=4&&avgC>=35)S.betConviction=3;
+    else if(S.betStableCount>=3&&avgC>=25)S.betConviction=2;
+    else if(S.betStableCount>=2)S.betConviction=1;
+    else S.betConviction=0;
+    // Momentum acceleration check — forward-looking
+    if(ind&&ind.e9&&ind.e21){
+      var emaGap=ind.e9-ind.e21;
+      var prevGap=S.prevEmaGap||0;
+      S.emaAccel=emaGap-prevGap;S.prevEmaGap=emaGap;
+      // Boost conviction if momentum accelerating in same direction
+      if((curDir==='ABOVE'&&S.emaAccel>0)||(curDir==='BELOW'&&S.emaAccel<0)){
+        S.betConviction=Math.min(5,S.betConviction+1)
+      }
+      // Reduce if momentum decelerating (early warning)
+      if((curDir==='ABOVE'&&S.emaAccel<-5)||(curDir==='BELOW'&&S.emaAccel>5)){
+        S.betConviction=Math.max(0,S.betConviction-1)
+      }
+    }
+  }else{
+    // HOLD or no signal — conviction decays
+    if(S.betConviction>0)S.betConviction=Math.max(0,S.betConviction-1);
+    S.betStableCount=Math.max(0,S.betStableCount-1)
+  }
+
+  // Bet sizing — conviction-scaled, mode-adaptive
   var bank=parseFloat(($('inBank')||{}).value)||0;
   var conf=a?a.conf:0;
   var bs=betSize(bank,conf,S.mode,a?a.call:'HOLD');
-  if(bank>0&&conf>0){
-    $('betAmt').textContent=fmt$(bs.amt,0);
-    $('betAmt').style.color=a&&a.call==='ABOVE'?CL.g:a&&a.call==='BELOW'?CL.r:CL.b;
-    $('betNote').textContent=bs.note
+  var convMult=[0,0.15,0.35,0.6,0.85,1.0][Math.min(S.betConviction,5)];
+  var dispAmt=Math.round(bs.amt*convMult);
+  var dirEl=$('betDir'),convEl=$('betConv');
+  // Bet direction label — above/below target
+  var tgt=a&&a.projPrice?fmt$(a.projPrice,0):(p?fmt$(p,0):'---');
+  if(bank>0&&curDir&&curDir!=='HOLD'&&S.betConviction>=1){
+    $('betAmt').textContent=fmt$(dispAmt,0);
+    $('betAmt').style.color=curDir==='ABOVE'?CL.g:CL.r;
+    dirEl.textContent=(curDir==='ABOVE'?'\u25B2 ABOVE ':'\u25BC BELOW ')+tgt;
+    dirEl.style.color=curDir==='ABOVE'?CL.g:CL.r;
+    var convLabels=['','Forming thesis...','Building position...','Growing confidence','Strong conviction','Maximum conviction \u2014 full deploy'];
+    $('betNote').textContent=bs.note+' \u2014 '+convLabels[S.betConviction]
+  }else if(bank>0&&conf>0){
+    $('betAmt').textContent='$--';$('betAmt').style.color=CL.o;
+    dirEl.textContent='\u23F3 ANALYZING DIRECTION...';dirEl.style.color=CL.t3;
+    $('betNote').textContent='Building conviction \u2014 patience yields precision'
   }else{
     $('betAmt').textContent='$--';$('betAmt').style.color=CL.b;
+    dirEl.textContent='';
     $('betNote').textContent=bank<=0?'Enter bankroll for AI bet sizing':'Waiting for signal...'
   }
+  // Conviction dots
+  var dotHTML='';
+  for(var di=0;di<5;di++){
+    var filled=di<S.betConviction;
+    var dc=filled?(S.betStableDir==='ABOVE'?CL.g:S.betStableDir==='BELOW'?CL.r:CL.o):'rgba(255,255,255,0.12)';
+    dotHTML+='<div class="bet-conv-dot" style="background:'+dc+';box-shadow:'+(filled?'0 0 6px '+dc:'none')+'"></div>'
+  }
+  dotHTML+='<span class="bet-conv-lbl">'+S.betConviction+'/5</span>';
+  convEl.innerHTML=dotHTML;
 
   // Mode AI Decision section
   var mh=$('modeAIHdr'),mc=$('modeAICall'),mw=$('modeAIWhy');
@@ -915,6 +992,11 @@ function render(){
     mc.style.color=a.call==='ABOVE'?CL.g:a.call==='BELOW'?CL.r:CL.o;
     var why=a.modeReason||'';
     if(a.projPrice)why+=' Projected: '+fmt$(a.projPrice,0)+'.';
+    // Forward-looking adaptive note
+    if(S.emaAccel!==undefined){
+      var acDir=S.emaAccel>0?'accelerating upward':S.emaAccel<-0?'accelerating downward':'neutral';
+      why+=' Momentum '+acDir+'.';
+    }
     mw.textContent=why
   }else{
     mc.textContent='ANALYZING';mc.style.color=CL.t3;
