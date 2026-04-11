@@ -538,9 +538,9 @@ var MARKET_CONFIGS={
   ETH:{symbol:'ETH',displayName:'Ethereum',binancePair:'ETHUSDT',binanceBase:'https://api.binance.us/api/v3',binanceFutures:'ETHUSDT',coinbaseProduct:'ETH-USD',krakenPair:'ETHUSD',krakenKey:'XETHZUSD',kalshiSeries:'KXETH',wsProductId:'ETH-USD',strikeRound:50,priceDec:2,color:'#627eea'},
   SOL:{symbol:'SOL',displayName:'Solana',binancePair:'SOLUSDT',binanceBase:'https://api.binance.us/api/v3',binanceFutures:'SOLUSDT',coinbaseProduct:'SOL-USD',krakenPair:'SOLUSD',krakenKey:'SOLUSD',kalshiSeries:'KXSOL',wsProductId:'SOL-USD',strikeRound:5,priceDec:2,color:'#9945ff'},
   XRP:{symbol:'XRP',displayName:'XRP',binancePair:'XRPUSDT',binanceBase:'https://api.binance.us/api/v3',binanceFutures:'XRPUSDT',coinbaseProduct:'XRP-USD',krakenPair:'XRPUSD',krakenKey:'XXRPZUSD',kalshiSeries:'KXXRP',wsProductId:'XRP-USD',strikeRound:0.1,priceDec:4,color:'#00aae4'},
-  HYPE:{symbol:'HYPE',displayName:'Hyperliquid',binancePair:'HYPEUSDT',binanceBase:'https://api.binance.com/api/v3',binanceFutures:'HYPEUSDT',coinbaseProduct:null,krakenPair:null,krakenKey:null,kalshiSeries:'KXHYPE',wsProductId:null,strikeRound:1,priceDec:3,color:'#00ffaa'},
+  HYPE:{symbol:'HYPE',displayName:'Hyperliquid',binancePair:'HYPEUSDT',binanceBase:'https://api.binance.us/api/v3',binanceFutures:'HYPEUSDT',coinbaseProduct:'HYPE-USD',krakenPair:'HYPEUSD',krakenKey:'HYPEUSD',kalshiSeries:'KXHYPE',wsProductId:'HYPE-USD',strikeRound:1,priceDec:3,color:'#00ffaa'},
   DOGE:{symbol:'DOGE',displayName:'Dogecoin',binancePair:'DOGEUSDT',binanceBase:'https://api.binance.us/api/v3',binanceFutures:'DOGEUSDT',coinbaseProduct:'DOGE-USD',krakenPair:'XDGUSD',krakenKey:'XDGUSD',kalshiSeries:'KXDOGE',wsProductId:'DOGE-USD',strikeRound:0.01,priceDec:5,color:'#c2a633'},
-  BNB:{symbol:'BNB',displayName:'BNB',binancePair:'BNBUSDT',binanceBase:'https://api.binance.com/api/v3',binanceFutures:'BNBUSDT',coinbaseProduct:null,krakenPair:null,krakenKey:null,kalshiSeries:'KXBNB',wsProductId:null,strikeRound:5,priceDec:2,color:'#f0b90b'}
+  BNB:{symbol:'BNB',displayName:'BNB',binancePair:'BNBUSDT',binanceBase:'https://api.binance.us/api/v3',binanceFutures:'BNBUSDT',coinbaseProduct:'BNB-USD',krakenPair:'BNBUSD',krakenKey:'BNBUSD',kalshiSeries:'KXBNB',wsProductId:'BNB-USD',strikeRound:5,priceDec:2,color:'#f0b90b'}
 };
 function getCfg(){return MARKET_CONFIGS[activeCoin]}
 
@@ -873,14 +873,14 @@ function drawChart(){
 
   // Price label
   ctx.fillStyle='#00d4ff';ctx.font='600 10px Inter,sans-serif';ctx.textAlign='right';
-  ctx.fillText(fmt$(vis[n-1],0),W-4,lastY-5);
+  ctx.fillText(fmt$(vis[n-1],getCfg().priceDec),W-4,lastY-5);
 
   // Min/max labels
   ctx.fillStyle=CL.t4;ctx.font='500 8px Inter,sans-serif';
   var realMn=vis[0],realMx=vis[0];for(var i=1;i<n;i++){if(vis[i]<realMn)realMn=vis[i];if(vis[i]>realMx)realMx=vis[i]}
   ctx.textAlign='left';
-  ctx.fillText('H:'+fmt$(realMx,0),4,12);
-  ctx.fillText('L:'+fmt$(realMn,0),4,pH-4);
+  ctx.fillText('H:'+fmt$(realMx,getCfg().priceDec),4,12);
+  ctx.fillText('L:'+fmt$(realMn,getCfg().priceDec),4,pH-4);
 }
 
 var chartRAF=null;
@@ -1302,14 +1302,14 @@ function analyze(opts){
       // S/R level between price and strike = barrier, dampens confidence
       var barrierStr=srTouches*0.15; // 0.15 to 0.6
       srScore=pr<strike?-barrierStr:barrierStr; // opposes the needed direction
-      signals.push({name:'S/R Barrier',val:sr.nearest.type+' at '+fmt$(sr.nearest.price,0)+' ('+srTouches+'x)',type:'dn'})
+      signals.push({name:'S/R Barrier',val:sr.nearest.type+' at '+fmt$(sr.nearest.price,getCfg().priceDec)+' ('+srTouches+'x)',type:'dn'})
     }else if(Math.abs(srDist)<0.2){
       // Price very near S/R = magnet effect, likely to hold/bounce
       var magnetDir=sr.nearest.type==='S'?1:-1; // support=bounce up, resistance=reject down
       srScore=magnetDir*sr.effect;
-      signals.push({name:'S/R Magnet',val:sr.nearest.type+' at '+fmt$(sr.nearest.price,0)+' ('+srTouches+'x)',type:magnetDir>0?'up':'dn'})
+      signals.push({name:'S/R Magnet',val:sr.nearest.type+' at '+fmt$(sr.nearest.price,getCfg().priceDec)+' ('+srTouches+'x)',type:magnetDir>0?'up':'dn'})
     }else{
-      signals.push({name:'S/R',val:'Nearest: '+fmt$(sr.nearest.price,0)+' ('+sr.nearest.type+')',type:'neu'})
+      signals.push({name:'S/R',val:'Nearest: '+fmt$(sr.nearest.price,getCfg().priceDec)+' ('+sr.nearest.type+')',type:'neu'})
     }
   }
   score+=clamp(srScore,-0.8,0.8);
@@ -1377,9 +1377,10 @@ function analyze(opts){
 
   // 10. STRIKE DISTANCE psychology
   var stDist=pr-strike,stPct=Math.abs(stDist)/pr*100;
-  var stLabel=stDist>=0?'+'+fmt$(stDist,0)+' above':fmt$(Math.abs(stDist),0)+' below';
+  var stLabel=stDist>=0?'+'+fmt$(stDist,getCfg().priceDec)+' above':fmt$(Math.abs(stDist),getCfg().priceDec)+' below';
   signals.push({name:'Strike Distance',val:stLabel,type:stDist>=0?'up':'dn'});
-  var nearRound=Math.abs(pr%1000)<100||Math.abs(pr%1000)>900;
+  var sr2=getCfg().strikeRound*2;
+  var nearRound=sr2>0?(Math.abs(pr%sr2)<sr2*0.1||Math.abs(pr%sr2)>sr2*0.9):false;
   if(nearRound&&stPct<0.3)score*=0.9;
 
   // ===== MODE-ADAPTIVE INTELLIGENCE + EV FRAMEWORK =====
@@ -1544,7 +1545,7 @@ function genieText(){
   else if(mode==='safe')pts.push('[SAFE MODE] Capital preservation protocol engaged.');
   else pts.push('[BALANCED MODE] Standard quantitative analysis.');
 
-  pts.push(getCfg().symbol+' at '+fmt$(p)+', '+fmt$(Math.abs(diff),0)+' '+side+' the '+fmt$(strike,0)+' strike.');
+  pts.push(getCfg().symbol+' at '+fmt$(p,getCfg().priceDec)+', '+fmt$(Math.abs(diff),getCfg().priceDec)+' '+side+' the '+fmt$(strike,getCfg().priceDec)+' strike.');
 
   // Trend — mode-adapted analysis
   if(ind.e9&&ind.e21){
@@ -1611,7 +1612,7 @@ function genieText(){
   // Trajectory + projected price
   if(S.traj&&a&&a.projPrice){
     var pSide=a.projPrice>strike?'above':'below';
-    pts.push('Projected close: '+fmt$(a.projPrice,0)+' ('+pSide+' strike, '+S.traj.conf.toFixed(0)+'% model fit).');
+    pts.push('Projected close: '+fmt$(a.projPrice,getCfg().priceDec)+' ('+pSide+' strike, '+S.traj.conf.toFixed(0)+'% model fit).');
   }
 
   // 15-minute higher timeframe analysis
@@ -1658,7 +1659,7 @@ function genieText(){
     if(a.modeConflict)pts.push('\u26A0\uFE0F '+a.modeConflict);
     // S/R context
     if(a.sr&&a.sr.nearest){
-      pts.push('Key level: '+a.sr.nearest.type+' at '+fmt$(a.sr.nearest.price,0)+' ('+a.sr.nearest.touches+'x tested).');
+      pts.push('Key level: '+a.sr.nearest.type+' at '+fmt$(a.sr.nearest.price,getCfg().priceDec)+' ('+a.sr.nearest.touches+'x tested).');
     }
   }
 
@@ -1878,7 +1879,7 @@ function analyzeTargetPrice(currentPrice,targetPrice,secondsToExpiry,recentPrice
   // ── RATIONALE BULLETS ───────────────────────────────────────────────
   // 1. Current position
   if(Math.abs(pctDist)>0.02){
-    rationale.push(getCfg().symbol+' currently '+fmt$(currentPrice)+', '+(diff>0?'+':'')+pctDist.toFixed(3)+'% '+(diff>0?'above':'below')+' the '+fmt$(targetPrice,0)+' target'+(minutesLeft<3?' — with <3 min left, position is dominant':'.'));
+    rationale.push(getCfg().symbol+' currently '+fmt$(currentPrice,getCfg().priceDec)+', '+(diff>0?'+':'')+pctDist.toFixed(3)+'% '+(diff>0?'above':'below')+' the '+fmt$(targetPrice,getCfg().priceDec)+' target'+(minutesLeft<3?' — with <3 min left, position is dominant':'.'));
   }else{
     rationale.push('Price sitting right at the target ('+pctDist.toFixed(3)+'% away) — razor-thin edge, could go either way.');
   }
@@ -2048,7 +2049,7 @@ function getDecision(style,inputs,forceOverride){
   rationale.push('Edge: '+edge.toFixed(3)+' (threshold: '+prof.edgeThresh+') — '+prof.label+' sizing.');
   if(a.dse)rationale.push('DSE: P(above)='+a.dse.probAbove.toFixed(2)+', entropy='+a.dse.entropy.toFixed(2)+', '+a.dse.ticksInState+' ticks in state.');
   if(S.ind&&S.ind.regime)rationale.push('Regime: '+S.ind.regime.replace('_',' ')+' — urgency '+Math.round((a.urgency||1)*100)+'%.');
-  if(a.sr&&a.sr.nearest)rationale.push('Key level: '+a.sr.nearest.type+' at '+fmt$(a.sr.nearest.price,0)+' ('+a.sr.nearest.touches+'x tested).');
+  if(a.sr&&a.sr.nearest)rationale.push('Key level: '+a.sr.nearest.type+' at '+fmt$(a.sr.nearest.price,getCfg().priceDec)+' ('+a.sr.nearest.touches+'x tested).');
   if(S.fundingRate)rationale.push('Funding: '+(S.fundingRate>0?'+':'')+S.fundingRate.toFixed(4)+'% — '+(S.fundingRate>0?'longs paying shorts':'shorts paying longs')+'.');
 
   var dec={roundId:roundId,style:style,direction:direction,probability:probForDir,edge:edge,
@@ -2148,20 +2149,21 @@ function lockStatus(){
 function render(){
   var p=S.price,ind=S.ind,kal=S.kal,a=S.analysis,ob=S.ob;
 
-  $('dot').className='dot '+(S.connected?'on':'off');
+  $('dot').className='dot '+(S.connected||S.price?'on':'off');
   $('clock').textContent=ts();
 
   // Price
   if(p){
-    $('pVal').textContent=fmt$(p);
+    var dec=getCfg().priceDec;
+    $('pVal').textContent=fmt$(p,dec);
     var chg=p-(S.lastPrice||p),chgP=(chg/(S.lastPrice||p))*100;
-    $('pChg').textContent=(chg>=0?'+':'')+fmt$(chg)+'  ('+chgP.toFixed(3)+'%)';
+    $('pChg').textContent=(chg>=0?'+':'')+fmt$(chg,dec)+'  ('+chgP.toFixed(3)+'%)';
     $('pChg').style.color=chg>=0?CL.g:CL.r;
   }
   $('s24h').textContent=(S.change24h>=0?'+':'')+S.change24h.toFixed(2)+'%';
   $('s24h').style.color=S.change24h>=0?CL.g:CL.r;
-  if(S.high24h)$('sHi').textContent=fmt$(S.high24h,0);
-  if(S.low24h)$('sLo').textContent=fmt$(S.low24h,0);
+  if(S.high24h)$('sHi').textContent=fmt$(S.high24h,getCfg().priceDec);
+  if(S.low24h)$('sLo').textContent=fmt$(S.low24h,getCfg().priceDec);
   if(S.vol24h)$('sVol').textContent='$'+fmtK(S.vol24h);
 
   // Timer
@@ -2174,7 +2176,7 @@ function render(){
   $('tmBar').style.background=pc;
   $('tmPhase').textContent=pl;$('tmPhase').style.color=pc;$('tmPhase').style.border='1px solid '+pc+'35';$('tmPhase').style.background=pc+'12';
   var strike=kal.open||(p?Math.round(p/getCfg().strikeRound)*getCfg().strikeRound:0);
-  if(strike)$('tmStrike').textContent='Strike: '+fmt$(strike,0);
+  if(strike)$('tmStrike').textContent='Strike: '+fmt$(strike,getCfg().priceDec);
 
   // Signal — always ABOVE or BELOW, with BET or LEAN prefix
   if(a){
@@ -2265,7 +2267,7 @@ function render(){
   var bank=parseFloat(($('inBank')||{}).value)||0;
   var conf=a?a.conf:0;
   var dirEl=$('betDir'),convEl=$('betConv');
-  var tgt=a&&a.projPrice?fmt$(a.projPrice,0):(p?fmt$(p,0):'---');
+  var tgt=a&&a.projPrice?fmt$(a.projPrice,getCfg().priceDec):(p?fmt$(p,getCfg().priceDec):'---');
 
   // Get or retrieve locked round decision
   var rd=getDecision(S.mode,{analysis:a,price:p});
@@ -2473,7 +2475,7 @@ function render(){
 
   // VWAP
   if(ind&&ind.vwap){
-    $('iVwap').textContent=fmt$(ind.vwap,0);
+    $('iVwap').textContent=fmt$(ind.vwap,getCfg().priceDec);
     var vwapSide=p>ind.vwap;
     $('iVwap').style.color=vwapSide?CL.g:CL.r;
     $('iVwapSub').textContent=vwapSide?'ABOVE — BULLISH':'BELOW — BEARISH';
