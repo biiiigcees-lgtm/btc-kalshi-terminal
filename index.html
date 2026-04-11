@@ -287,10 +287,44 @@ var S = {
     flips:0,              // flip counter — penalizes oscillation
     lastFlipTick:0,       // tick of last flip — for cooldown
     totalTicks:0,         // total ticks processed
-    commitThresh:0.68,    // min P(dir) to commit — rises with flips
-    releaseThresh:0.42,   // P(dir) must drop below this to release state
-    minHold:15,           // minimum ticks to hold a state (rises with stability)
+    commitThresh:0.72,    // min P(dir) to commit — higher = stricter
+    releaseThresh:0.38,   // P(dir) must drop below this to release state
+    minHold:20,           // minimum ticks to hold a state
     dampingFactor:1.0     // multiplier that reduces reactivity after flips
+  },
+  // EV — Expected Value & Risk Framework
+  ev:{
+    edge:0,               // current edge estimate (2p-1)
+    ev:0,                 // expected value of current signal
+    evHistory:[],         // last 40 EV calculations for audit
+    safetyMargin:0.08,    // minimum edge required (mode-adaptive)
+    totalBets:0,          // total bets suggested
+    totalSkips:0,         // total skips (EV too low / no confluence)
+    selectivity:1.0       // ratio: skips/(bets+skips) — higher = more selective
+  },
+  // Confluence — independent signal class tracking
+  conf:{
+    classes:{trend:0,osc:0,mom:0,vol:0,flow:0,htf:0}, // per-class scores
+    aligned:0,            // count of classes agreeing with direction
+    required:3,           // minimum classes required (mode-adaptive: safe=4,balanced=3,aggr=2)
+    agreement:0           // directional agreement ratio (0-1)
+  },
+  // Path Dependency — signal reliability tracking
+  pathDep:{
+    outcomes:[],          // last 20 {signal,result,ts} for auditing
+    weights:{trend:1,osc:1,mom:1,vol:1,flow:1,traj:1,div:1,htf:1}, // adaptive weights per signal class
+    failStreak:0,         // consecutive failed signals — triggers caution
+    breakoutTrust:1.0,    // reduced after fake breakouts (decays back to 1.0)
+    regimeHistory:[]      // last 10 regimes for regime-shift detection
+  },
+  // Risk — Drawdown control
+  risk:{
+    peakBank:0,           // highest bankroll seen
+    currentDD:0,          // current drawdown % from peak
+    ddLimit:0.15,         // hard drawdown limit (15% default, mode-adaptive)
+    throttle:1.0,         // risk throttle multiplier (reduces sizing during DD)
+    totalPnL:0,           // running P&L tracking
+    sessionBets:0         // bets this session
   },
   _lhp:0, _lktl:900, _chartDirty:true
 };
@@ -537,6 +571,110 @@ function trajectory(d,tl){
   return{proj:combined,conf:conf,slope:slope,vel:vel}
 }
 
+/* ======== EV FRAMEWORK — Expected Value Calculator ======== */
+function calcEV(conf,mode){
+  // Convert confidence to win probability with conservative mapping
+  // p = 0.5 + (conf/100) * 0.28 — slightly less aggressive than raw
+  var p=0.5+(conf/100)*0.28;
+  var edge=2*p-1;
+  // EV = edge * kelly_fraction — represents expected growth per unit
+  var ev=edge*p-((1-p)*(1-edge));
+  // Safety margin: mode-adaptive minimum edge to act
+  var margin=mode==='aggressive'?0.06:mode==='safe'?0.12:0.08;
+  S.ev.edge=edge;S.ev.ev=ev;
+  S.ev.evHistory.push({ev:ev,edge:edge,t:Date.now()});
+  if(S.ev.evHistory.length>40)S.ev.evHistory.shift();
+  S.ev.safetyMargin=margin;
+  return{p:p,edge:edge,ev:ev,viable:edge>margin&&ev>0}
+}
+
+/* ======== CONFLUENCE GATE — Independent Signal Class Agreement ======== */
+function checkConfluence(trendS,oscS,momS,volS,flowS,htfS,mode){
+  var C=S.conf;
+  C.classes={trend:trendS,osc:oscS,mom:momS,vol:volS,flow:flowS,htf:htfS};
+  // Count how many independent classes agree on direction
+  var bullish=0,bearish=0,total=0;
+  var thresh={trend:0.4,osc:0.25,mom:0.25,vol:0.15,flow:0.15,htf:0.25};
+  for(var k in C.classes){
+    if(!C.classes.hasOwnProperty(k))continue;
+    var v=C.classes[k];
+    total++;
+    if(v>thresh[k])bullish++;
+    else if(v<-thresh[k])bearish++;
+  }
+  var dominant=Math.max(bullish,bearish);
+  C.aligned=dominant;
+  C.agreement=total>0?dominant/total:0;
+  // Mode-adaptive requirement
+  C.required=mode==='safe'?4:mode==='aggressive'?2:3;
+  var pass=dominant>=C.required;
+  // Additional: reject if classes are split (some bull, some bear with conviction)
+  var conflicted=bullish>=2&&bearish>=2;
+  if(conflicted)pass=false;
+  return{pass:pass,aligned:dominant,total:total,direction:bullish>=bearish?1:-1,conflicted:conflicted,agreement:C.agreement}
+}
+
+/* ======== PATH DEPENDENCY — Signal Reliability Tracking ======== */
+function updatePathDep(regime){
+  var PD=S.pathDep;
+  // Track regime shifts
+  PD.regimeHistory.push(regime);
+  if(PD.regimeHistory.length>10)PD.regimeHistory.shift();
+  // Detect regime instability — if regime changed 3+ times in last 10 ticks, reduce breakout trust
+  if(PD.regimeHistory.length>=5){
+    var shifts=0;
+    for(var i=1;i<PD.regimeHistory.length;i++){if(PD.regimeHistory[i]!==PD.regimeHistory[i-1])shifts++}
+    if(shifts>=3)PD.breakoutTrust=Math.max(0.4,PD.breakoutTrust-0.05);
+    else PD.breakoutTrust=Math.min(1.0,PD.breakoutTrust+0.01);
+  }
+  return PD
+}
+
+/* ======== SIGNAL WEIGHT AUDITOR — Downweight failing signals ======== */
+function auditSignalWeights(){
+  var PD=S.pathDep;
+  if(PD.outcomes.length<5)return; // need minimum history
+  // Check last 10 outcomes per signal class
+  var classHits={},classMiss={};
+  for(var i=Math.max(0,PD.outcomes.length-10);i<PD.outcomes.length;i++){
+    var o=PD.outcomes[i];
+    if(!o||!o.signal)continue;
+    if(!classHits[o.signal])classHits[o.signal]=0;
+    if(!classMiss[o.signal])classMiss[o.signal]=0;
+    if(o.result==='hit')classHits[o.signal]++;
+    else classMiss[o.signal]++;
+  }
+  // Adjust weights: scale between 0.5 (failed) and 1.2 (reliable)
+  for(var k in PD.weights){
+    if(!PD.weights.hasOwnProperty(k))continue;
+    var h=classHits[k]||0,m=classMiss[k]||0,t=h+m;
+    if(t>=3){
+      var rate=h/t;
+      PD.weights[k]=clamp(0.5+rate*0.7,0.5,1.2);
+    }else{
+      // Decay slowly toward 1.0 when no data
+      PD.weights[k]=PD.weights[k]*0.98+1.0*0.02;
+    }
+  }
+}
+
+/* ======== RISK THROTTLE — Drawdown-based position sizing control ======== */
+function updateRiskThrottle(bank,mode){
+  var R=S.risk;
+  if(bank>R.peakBank)R.peakBank=bank;
+  R.currentDD=R.peakBank>0?(R.peakBank-bank)/R.peakBank:0;
+  R.ddLimit=mode==='aggressive'?0.20:mode==='safe'?0.10:0.15;
+  // Throttle: linear reduction as drawdown approaches limit
+  if(R.currentDD>=R.ddLimit){
+    R.throttle=0.1; // 90% reduction at limit
+  }else if(R.currentDD>R.ddLimit*0.5){
+    R.throttle=1-(R.currentDD/R.ddLimit)*0.9;
+  }else{
+    R.throttle=1.0;
+  }
+  return R.throttle
+}
+
 /* ======== DSE — DETERMINISTIC STATE ENGINE ======== */
 /* Asymptotically optimal, probabilistic-dominance-gated control system.
    Converts raw score into stable, committed decisions with:
@@ -579,13 +717,11 @@ function dseUpdate(rawScore,rawConf,rawCall,modeThresh){
   var pa=clamp(D.probAbove,0.01,0.99),pb=clamp(D.probBelow,0.01,0.99);
   D.entropy=-(pa*Math.log2(pa)+pb*Math.log2(pb));
 
-  // 5. ASYMPTOTIC THRESHOLDS — commit threshold rises after flips, decays with stability
-  // After each flip: commitThresh += 0.04 (harder to flip again)
-  // Each stable tick: commitThresh slowly decays toward baseline 0.68
-  var baseCommit=0.68,baseRelease=0.42;
-  var flipPenalty=Math.min(D.flips*0.04,0.20); // max +0.20 from flips
+  // 5. ASYMPTOTIC THRESHOLDS — commit requires strong probabilistic dominance
+  var baseCommit=0.72,baseRelease=0.38;
+  var flipPenalty=Math.min(D.flips*0.04,0.18);
   D.commitThresh=baseCommit+flipPenalty;
-  D.releaseThresh=baseRelease-flipPenalty*0.5; // release also gets stricter
+  D.releaseThresh=baseRelease-flipPenalty*0.5;
   // Stability reward: long holds reduce the penalty asymptotically
   if(D.ticksInState>20){
     var decay=1-1/(1+D.ticksInState*0.02); // asymptotic toward 1
@@ -593,25 +729,31 @@ function dseUpdate(rawScore,rawConf,rawCall,modeThresh){
     if(D.flips>0&&D.ticksInState>50)D.flips=Math.max(0,D.flips-1); // forgive old flips
   }
 
-  // 6. MINIMUM HOLD — rises with flip count, ensures no rapid state changes
-  D.minHold=15+D.flips*5; // base 15 ticks, +5 per historical flip
-  if(D.minHold>60)D.minHold=60; // cap at 60 ticks (1 min)
+  // 6. MINIMUM HOLD — rises with flip count, ensures disciplined execution
+  D.minHold=20+D.flips*6; // base 20 ticks, +6 per historical flip
+  if(D.minHold>90)D.minHold=90; // cap at 90 ticks (1.5 min)
 
-  // 7. STATE MACHINE — deterministic transitions with probabilistic dominance gating
+  // 7. STATE MACHINE — deterministic transitions with EV + confluence + probabilistic dominance
   var newState=D.state;
   var newConf=D.stateConf;
+  // Access EV and confluence state (updated by analyze before calling DSE)
+  var evViable=S.ev.edge>S.ev.safetyMargin&&S.ev.ev>0;
+  var confPass=S.conf.aligned>=S.conf.required&&!S.conf.conflicted;
+  var entropyLow=D.entropy<0.55; // stricter than before: 0.55 vs 0.7
 
   if(D.state==='HOLD'){
     // TRANSITION: HOLD -> ABOVE or BELOW
-    // Requires: P(dir) > commitThresh AND entropy < 0.7 AND min samples
-    if(D.probAbove>D.commitThresh&&D.entropy<0.7&&D.totalTicks>10){
+    // ALL gates must pass: P(dir) > commit AND entropy low AND EV > 0 AND confluence AND min ticks
+    if(D.probAbove>D.commitThresh&&entropyLow&&evViable&&confPass&&D.totalTicks>15){
       newState='ABOVE';newConf=clamp(Math.round(D.probAbove*100),5,98);
       D.flips++;D.lastFlipTick=D.totalTicks;D.regime=S.ind?S.ind.regime:'unknown'
-    }else if(D.probBelow>D.commitThresh&&D.entropy<0.7&&D.totalTicks>10){
+    }else if(D.probBelow>D.commitThresh&&entropyLow&&evViable&&confPass&&D.totalTicks>15){
       newState='BELOW';newConf=clamp(Math.round(D.probBelow*100),5,98);
       D.flips++;D.lastFlipTick=D.totalTicks;D.regime=S.ind?S.ind.regime:'unknown'
     }else{
-      newConf=clamp(Math.round((1-D.entropy)*50),0,50) // HOLD confidence = certainty that holding is correct
+      newConf=clamp(Math.round((1-D.entropy)*50),0,50);
+      // Track skips
+      if(D.totalTicks>15)S.ev.totalSkips++
     }
   }else if(D.state==='ABOVE'){
     D.ticksInState++;
@@ -750,44 +892,71 @@ function analyze(opts){
   // 8. HTF CONFIRMATION — 15-minute chart analysis for macro context (max ±1.5)
   var htfScore=0,htfLabel='NO DATA',htfType='neu';
   if(ind15m){
-    // 15m trend direction
     if(ind15m.e9&&ind15m.e21){
       var htfBull=ind15m.e9>ind15m.e21;htfScore+=(htfBull?0.6:-0.6);
       if(ind15m.e50){var htfAligned=htfBull?(ind15m.e9>ind15m.e21&&ind15m.e21>ind15m.e50):(ind15m.e9<ind15m.e21&&ind15m.e21<ind15m.e50);if(htfAligned)htfScore+=(htfBull?0.3:-0.3)}
     }
-    // 15m RSI confirmation
     if(ind15m.r14!==null){if(ind15m.r14>55)htfScore+=0.2;else if(ind15m.r14<45)htfScore-=0.2}
-    // 15m MACD confirmation
     if(ind15m.mc){if(ind15m.mc.hist>0)htfScore+=0.2;else htfScore-=0.2}
-    // 15m regime context
     if(ind15m.regime==='trending_up')htfScore+=0.2;else if(ind15m.regime==='trending_down')htfScore-=0.2;
     htfLabel=htfScore>0.3?'BULLISH 15M':htfScore<-0.3?'BEARISH 15M':'NEUTRAL 15M';
     htfType=htfScore>0.3?'up':htfScore<-0.3?'dn':'neu';
-    // HTF alignment bonus: if 1m and 15m agree, boost; if they disagree, dampen
     var agree=(score>0&&htfScore>0)||(score<0&&htfScore<0);
-    if(agree)score*=1.15; // 15% confidence boost for aligned timeframes
-    else if(Math.abs(htfScore)>0.4)score*=0.8; // dampen if 15m contradicts
+    if(agree)score*=1.15;
+    else if(Math.abs(htfScore)>0.4)score*=0.8;
   }
   signals.push({name:'15M Trend',val:htfLabel,type:htfType});
   score+=clamp(htfScore,-1.5,1.5);
 
-  // 9. TIMING GATE
-  var timingOk=kal.phase==='early'||kal.phase==='mid';
-  if(!timingOk)score*=0.3;
-  signals.push({name:'Timing Gate',val:timingOk?'ENTRY OK':'LATE \u2014 CAUTION',type:timingOk?'up':'dn'});
+  // ===== PATH DEPENDENCY — adjust weights based on recent outcomes =====
+  var PD=updatePathDep(regime);
+  auditSignalWeights();
+  // Apply adaptive weights from signal audit
+  score=trendScore*W.trend*PD.weights.trend+clamp(oscScore,-1.5,1.5)*W.osc*PD.weights.osc+
+    clamp(momScore,-1.5,1.5)*W.mom*PD.weights.mom+clamp(volScore,-1,1)*W.struct*PD.weights.vol+
+    clamp(flowScore,-1,1)*W.vol*PD.weights.flow+clamp(trajScore,-1.2,1.2)*W.traj*PD.weights.traj+
+    clamp(divScore,-0.8,0.8)*W.diverge*PD.weights.div+clamp(htfScore,-1.5,1.5)*PD.weights.htf;
+  // Reduce breakout signals after fake breakouts
+  if(regime==='compression'||regime==='ranging')score*=PD.breakoutTrust;
+
+  // ===== CONFLUENCE GATE — require independent signal class agreement =====
+  var cfl=checkConfluence(trendScore,oscScore,momScore,volScore,flowScore,htfScore,mode);
+  signals.push({name:'Confluence',val:cfl.aligned+'/'+cfl.total+(cfl.conflicted?' CONFLICT':''),
+    type:cfl.pass?'up':cfl.conflicted?'dn':'neu'});
+
+  // 9. TIMING GATE — micro-timing near expiry > early entry
+  var phase=kal.phase;
+  var timingMult=1.0;
+  if(phase==='early'){
+    timingMult=0.4; // early phase: heavy penalty — avoid premature entries
+    signals.push({name:'Timing',val:'EARLY \u2014 PATIENCE',type:'neu'})
+  }else if(phase==='mid'){
+    timingMult=0.85; // mid phase: slight penalty
+    signals.push({name:'Timing',val:'MID \u2014 WATCHING',type:'neu'})
+  }else if(phase==='late'){
+    timingMult=1.0; // late phase: optimal for micro-timing
+    signals.push({name:'Timing',val:'LATE \u2014 OPTIMAL',type:'up'})
+  }else{
+    timingMult=0.2; // expired or unknown
+    signals.push({name:'Timing',val:'EXPIRED',type:'dn'})
+  }
+  score*=timingMult;
 
   // 10. STRIKE DISTANCE psychology
   var stDist=pr-strike,stPct=Math.abs(stDist)/pr*100;
   var stLabel=stDist>=0?'+'+fmt$(stDist,0)+' above':fmt$(Math.abs(stDist),0)+' below';
   signals.push({name:'Strike Distance',val:stLabel,type:stDist>=0?'up':'dn'});
-  // Round number proximity bonus
   var nearRound=Math.abs(pr%1000)<100||Math.abs(pr%1000)>900;
-  if(nearRound&&stPct<0.3)score*=0.9; // reduce confidence near round numbers (noise)
+  if(nearRound&&stPct<0.3)score*=0.9;
 
-  // ===== MODE-ADAPTIVE INTELLIGENCE =====
-  // Each mode is a fundamentally different quant strategy, not just a risk slider
-  var maxS=9.5;
+  // ===== MODE-ADAPTIVE INTELLIGENCE + EV FRAMEWORK =====
+  var maxS=11.0; // expanded max due to path-dep weighted score
   var rawConf=clamp(Math.round((Math.abs(score)/maxS)*100),0,98);
+
+  // Compute EV — reject if edge < safety margin
+  var evResult=calcEV(rawConf,mode);
+  signals.push({name:'EV',val:evResult.viable?'EV+ ('+evResult.edge.toFixed(2)+')':'EV- REJECT',
+    type:evResult.viable?'up':'dn'});
 
   // 15m alignment context for mode reasoning
   var htfNote='';
@@ -799,69 +968,88 @@ function analyze(opts){
 
   var call,reason,modeConf,modeReason,modePriceBias;
 
-  if(mode==='aggressive'){
-    // AGGRESSIVE: Momentum-chasing quant — trades on early signals, maximizes edge extraction
-    // Lower bar to enter, amplifies directional conviction, trades volatile regimes
-    var aThresh=1.4;
-    var aScore=score*(1+Math.abs(ind.mom)*3); // amplify by momentum magnitude
-    modeConf=clamp(Math.round((Math.abs(aScore)/maxS)*110),0,98); // inflated confidence
-    modePriceBias=traj?traj.slope*2.5:0; // extrapolate aggressively
-    if(aScore>=aThresh){call='ABOVE';reason='Strong bullish momentum — aggressive entry ABOVE'}
-    else if(aScore<=-aThresh){call='BELOW';reason='Bearish momentum accelerating — aggressive entry BELOW'}
-    else{call='HOLD';reason='No clear momentum edge — standing aside'}
-    modeReason=call!=='HOLD'?'Momentum-capture strategy: early entry on directional signals. '+
-      (ind.mc&&ind.mc.crossUp?'Fresh MACD cross amplifies conviction. ':ind.mc&&ind.mc.crossDown?'MACD bearish cross confirms selling pressure. ':'')+
-      'Regime: '+ind.regime.replace('_',' ')+'.'+htfNote+' Risk-on approach targeting maximum edge extraction.':
-      'Waiting for strong directional catalyst.'+htfNote+' Even aggressive mode requires quantifiable momentum before deploying capital.'
+  // HARD GATES — apply before any mode decision
+  // 1. Entropy rejection: conflicting indicators = skip entirely
+  if(cfl.conflicted){
+    call='HOLD';reason='SKIP — signal classes conflicted, high market entropy';
+    modeConf=0;modeReason='Confluence gate: '+cfl.aligned+'/'+cfl.total+' classes aligned but opposing classes detected. No trade when directional agreement is ambiguous. Disciplined skip.';
+    modePriceBias=0;
+  }
+  // 2. Confluence rejection: not enough independent agreement
+  else if(!cfl.pass){
+    call='HOLD';reason='SKIP — insufficient confluence ('+cfl.aligned+'/'+cfl.required+' classes)';
+    modeConf=0;modeReason='Confluence gate requires '+cfl.required+' aligned signal classes (Trend, Oscillators, Momentum, Volume, Flow, 15M). Currently '+cfl.aligned+' aligned. No confluence = no trade.';
+    modePriceBias=0;
+  }
+  // 3. EV rejection: edge below safety margin
+  else if(!evResult.viable){
+    call='HOLD';reason='SKIP — EV negative or below safety margin ('+evResult.edge.toFixed(3)+' < '+S.ev.safetyMargin+')';
+    modeConf=0;modeReason='Expected value check failed. Edge: '+evResult.edge.toFixed(3)+', required margin: '+S.ev.safetyMargin+'. Marginal setups rejected. Only act on clear +EV.';
+    modePriceBias=0;
+  }
+  // 4. Path dependency caution: fail streak
+  else if(PD.failStreak>=3){
+    call='HOLD';reason='SKIP — '+PD.failStreak+' consecutive failed signals, risk throttled';
+    modeConf=0;modeReason='Path dependency: '+PD.failStreak+' recent signals failed. Auto-pause to avoid revenge logic and recency bias. Waiting for regime stabilization.';
+    modePriceBias=0;
+  }
+  // 5. All gates passed — mode-specific strategy
+  else if(mode==='aggressive'){
+    var aThresh=1.8; // raised from 1.4 — fewer but higher-conviction trades
+    var aScore=score*(1+Math.abs(ind.mom)*2);
+    modeConf=clamp(Math.round((Math.abs(aScore)/maxS)*105),0,98);
+    modePriceBias=traj?traj.slope*2.0:0;
+    if(aScore>=aThresh){call='ABOVE';reason='EV+ bullish momentum — aggressive entry ABOVE'}
+    else if(aScore<=-aThresh){call='BELOW';reason='EV+ bearish momentum — aggressive entry BELOW'}
+    else{call='HOLD';reason='Edge insufficient for aggressive commitment'}
+    modeReason=call!=='HOLD'?'Momentum-capture: confluence '+cfl.aligned+'/'+cfl.total+' classes. EV='+evResult.ev.toFixed(3)+'. '+
+      (ind.mc&&ind.mc.crossUp?'MACD cross amplifies. ':ind.mc&&ind.mc.crossDown?'MACD bearish confirms. ':'')+
+      'Regime: '+regime.replace('_',' ')+'.'+htfNote+' Risk-adjusted edge extraction.':
+      'Waiting for stronger edge.'+htfNote+' Selectivity: '+Math.round(S.ev.selectivity*100)+'%.'
 
   }else if(mode==='safe'){
-    // SAFE: Capital preservation quant — only trades ironclad setups, multiple confirmations required
-    // Needs trend + oscillator + momentum all aligned, avoids volatile/compression regimes
-    var sThresh=3.8;
-    var sScore=score*0.75; // dampen signal
-    var regimePenalty=(regime==='volatile'||regime==='compression')?0.4:1.0;
+    var sThresh=4.2; // raised from 3.8
+    var sScore=score*0.7;
+    var regimePenalty=(regime==='volatile'||regime==='compression')?0.35:1.0;
     sScore*=regimePenalty;
-    modeConf=clamp(Math.round((Math.abs(sScore)/maxS)*80),0,98); // conservative confidence
-    modePriceBias=traj?traj.slope*0.5:0; // conservative projection
-    // Require at least 3 aligned strong categories
+    modeConf=clamp(Math.round((Math.abs(sScore)/maxS)*75),0,98);
+    modePriceBias=traj?traj.slope*0.5:0;
     var strongUp=0,strongDn=0;
     if(trendScore>0.5)strongUp++;if(trendScore<-0.5)strongDn++;
     if(oscScore>0.3)strongUp++;if(oscScore<-0.3)strongDn++;
     if(momScore>0.3)strongUp++;if(momScore<-0.3)strongDn++;
     if(flowScore>0.2)strongUp++;if(flowScore<-0.2)strongDn++;
-    var multiConfirm=Math.max(strongUp,strongDn)>=3;
-    if(sScore>=sThresh&&multiConfirm){call='ABOVE';reason='Multi-confirmed bullish setup — safe entry ABOVE'}
-    else if(sScore<=-sThresh&&multiConfirm){call='BELOW';reason='Multi-confirmed bearish setup — safe entry BELOW'}
-    else{call='HOLD';reason='Insufficient confirmation for safe deployment — protecting capital'}
-    modeReason=call!=='HOLD'?'Capital preservation strategy: '+Math.max(strongUp,strongDn)+'/4 category confirmations aligned. '+
-      'Trend, oscillators, momentum'+(Math.max(strongUp,strongDn)>=4?', and order flow all':'')+ ' in agreement. '+
-      (regimePenalty<1?'Regime penalty applied ('+ind.regime.replace('_',' ')+') — still cleared threshold.':'Clean regime for entry.')+
-      htfNote+' High-probability, low-risk setup.':
-      'Capital preservation mode requires 3+ aligned signal categories and score threshold of '+sThresh.toFixed(1)+'. '+
-      'Currently: '+(Math.max(strongUp,strongDn))+' aligned categories, raw score '+Math.abs(sScore).toFixed(1)+'. '+
-      (regimePenalty<1?'Regime ('+ind.regime.replace('_',' ')+') adding caution. ':'')+'Patience is the edge here.'
+    var multiConfirm=Math.max(strongUp,strongDn)>=4; // raised from 3 to 4
+    if(sScore>=sThresh&&multiConfirm){call='ABOVE';reason='EV+ multi-confirmed bullish — safe entry ABOVE'}
+    else if(sScore<=-sThresh&&multiConfirm){call='BELOW';reason='EV+ multi-confirmed bearish — safe entry BELOW'}
+    else{call='HOLD';reason='Insufficient for safe deployment — capital preservation active'}
+    modeReason=call!=='HOLD'?'Capital preservation: '+Math.max(strongUp,strongDn)+'/4 categories, confluence '+cfl.aligned+'/'+cfl.total+'. EV='+evResult.ev.toFixed(3)+'. '+
+      (regimePenalty<1?'Regime penalty ('+regime.replace('_',' ')+'). ':'Clean regime. ')+
+      htfNote+' Drawdown-penalized, high-confidence only.':
+      'Safe mode: need 4+ categories, score '+sThresh.toFixed(1)+'. Got '+Math.max(strongUp,strongDn)+' categories, score '+Math.abs(sScore).toFixed(1)+'. Patience is the edge.'
 
   }else{
-    // BALANCED: Standard quant — weights all factors equally, median risk
-    var bThresh=2.3;
+    var bThresh=2.8; // raised from 2.3 — fewer, cleaner trades
     modeConf=rawConf;
     modePriceBias=traj?traj.slope*1.2:0;
-    if(score>=bThresh){call='ABOVE';reason='Bullish confluence confirmed — BET ABOVE STRIKE'}
-    else if(score<=-bThresh){call='BELOW';reason='Bearish confluence confirmed — BET BELOW STRIKE'}
-    else{call='HOLD';reason='Insufficient edge — standing aside this round'}
-    modeReason=call!=='HOLD'?'Balanced quant approach: weighting trend, oscillators, momentum, volatility, flow, trajectory, and divergence equally. '+
-      'Score '+Math.abs(score).toFixed(1)+' exceeds threshold '+bThresh+'. '+
-      'Regime: '+ind.regime.replace('_',' ')+'.'+htfNote+' Optimal risk/reward ratio for deployment.':
-      'Balanced analysis shows score '+Math.abs(score).toFixed(1)+' vs threshold '+bThresh+'. '+
-      'Signal not yet strong enough across categories. Watching for convergence.'
+    if(score>=bThresh){call='ABOVE';reason='EV+ bullish confluence — BET ABOVE STRIKE'}
+    else if(score<=-bThresh){call='BELOW';reason='EV+ bearish confluence — BET BELOW STRIKE'}
+    else{call='HOLD';reason='Edge insufficient — disciplined skip'}
+    modeReason=call!=='HOLD'?'Balanced: confluence '+cfl.aligned+'/'+cfl.total+' classes aligned. Score '+Math.abs(score).toFixed(1)+' > '+bThresh+'. EV='+evResult.ev.toFixed(3)+'. '+
+      'Regime: '+regime.replace('_',' ')+'.'+htfNote+' Risk-adjusted optimal deployment.':
+      'Score '+Math.abs(score).toFixed(1)+' vs threshold '+bThresh+'. Confluence: '+cfl.aligned+'/'+cfl.required+'. Selectivity: '+Math.round(S.ev.selectivity*100)+'%.'
   }
+
+  // Update selectivity ratio
+  if(call!=='HOLD')S.ev.totalBets++;
+  var totalDecisions=S.ev.totalBets+S.ev.totalSkips;
+  S.ev.selectivity=totalDecisions>0?S.ev.totalSkips/totalDecisions:1.0;
 
   // Price projection per mode
   var projPrice=traj?traj.proj+modePriceBias:null;
 
   // ===== DSE — DETERMINISTIC STATE ENGINE =====
-  // Feed raw score through the probabilistic dominance controller
-  var modeThreshRef=mode==='aggressive'?1.4:mode==='safe'?3.8:2.3;
+  var modeThreshRef=mode==='aggressive'?1.8:mode==='safe'?4.2:2.8;
   var dse=dseUpdate(score,modeConf,call,modeThreshRef);
 
   // DSE overrides raw call with stateful, noise-filtered, committed decision
@@ -985,11 +1173,26 @@ function genieText(){
     pts.push('15M analysis: loading historical chart data for macro context...');
   }
 
-  // Final call
+  // Final call — EV-optimized framework
   if(a){
-    if(a.call==='ABOVE')pts.push('GENIE verdict: firm ABOVE at '+a.conf+'% confidence.'+(mode==='aggressive'?' Deploy now.':mode==='safe'?' High-conviction confirmed.':' High-edge setup.'));
-    else if(a.call==='BELOW')pts.push('GENIE verdict: firm BELOW at '+a.conf+'% confidence.'+(mode==='aggressive'?' Deploy now.':mode==='safe'?' All safety checks passed.':' Clear bearish structure.'));
-    else pts.push('GENIE verdict: HOLD — '+(mode==='aggressive'?'even aggressive mode sees no quantifiable edge here.':mode==='safe'?'insufficient multi-category confirmation for safe deployment.':'signals not aligned for a confident play.'));
+    var dseI=a.dse||{};
+    var evI=S.ev;
+    var confI=S.conf;
+    if(a.call==='ABOVE'){
+      pts.push('VERDICT: ABOVE at '+a.conf+'% confidence. EV='+evI.ev.toFixed(3)+', edge='+evI.edge.toFixed(3)+'. Confluence: '+confI.aligned+'/'+confI.required+' classes aligned.');
+      pts.push('Selectivity: '+Math.round(evI.selectivity*100)+'% skip rate ('+evI.totalBets+' bets / '+evI.totalSkips+' skips). Consistency over frequency.');
+    }else if(a.call==='BELOW'){
+      pts.push('VERDICT: BELOW at '+a.conf+'% confidence. EV='+evI.ev.toFixed(3)+', edge='+evI.edge.toFixed(3)+'. Confluence: '+confI.aligned+'/'+confI.required+' classes aligned.');
+      pts.push('Selectivity: '+Math.round(evI.selectivity*100)+'% skip rate. Disciplined execution — fewer trades, cleaner edge.');
+    }else{
+      var skipReason='';
+      if(confI.aligned<confI.required)skipReason='insufficient confluence ('+confI.aligned+'/'+confI.required+')';
+      else if(evI.edge<evI.safetyMargin)skipReason='EV below safety margin ('+evI.edge.toFixed(3)+' < '+evI.safetyMargin+')';
+      else if(dseI.entropy>0.55)skipReason='high entropy (H='+dseI.entropy.toFixed(2)+')';
+      else skipReason='edge below threshold';
+      pts.push('VERDICT: HOLD — disciplined skip. Reason: '+skipReason+'. Marginal setups rejected. Only act on +EV with confluence.');
+      if(S.risk.currentDD>0.05)pts.push('Drawdown: '+(S.risk.currentDD*100).toFixed(1)+'% — risk throttle active at '+(S.risk.throttle*100).toFixed(0)+'%.');
+    }
   }
 
   return pts.join(' ')
@@ -998,30 +1201,34 @@ function genieText(){
 /* ======== BET SIZING — MODE-ADAPTIVE KELLY CRITERION ======== */
 function betSize(bank,conf,mode,call){
   if(!bank||bank<=0||conf<=0)return{amt:0,frac:0,note:'',edge:0};
-  var p=0.5+(conf/100)*0.32;
+  // Risk throttle — drawdown-based automatic sizing reduction
+  var throttle=updateRiskThrottle(bank,mode);
+  var p=0.5+(conf/100)*0.28; // conservative win probability mapping
   var edge=2*p-1;
   if(edge<=0)return{amt:0,frac:0,note:'Edge negative \u2014 no bet',edge:0};
+  // Reject if edge below mode's safety margin
+  var margin=mode==='aggressive'?0.06:mode==='safe'?0.12:0.08;
+  if(edge<margin)return{amt:0,frac:0,note:'Edge '+edge.toFixed(3)+' < margin '+margin+' \u2014 skip',edge:edge};
 
   var mult,label,note;
   if(mode==='aggressive'){
-    // Full Kelly — max edge extraction, accept higher variance
-    mult=0.9;label='Full Kelly';
-    note=label+' \u00B7 '+(p*100).toFixed(0)+'% win est. \u00B7 Max edge extraction';
+    mult=0.7;label='Fractional Kelly'; // reduced from 0.9 — penalize drawdowns
+    note=label+' \u00B7 '+(p*100).toFixed(0)+'% win est. \u00B7 EV-optimized';
   }else if(mode==='safe'){
-    // Quarter Kelly — capital preservation, smooth equity curve
-    mult=0.2;label='Quarter Kelly';
-    note=label+' \u00B7 '+(p*100).toFixed(0)+'% win est. \u00B7 Capital preservation';
-    // Safe mode refuses to bet on HOLD signals
+    mult=0.15;label='Eighth Kelly'; // reduced from 0.2 — capital preservation
+    note=label+' \u00B7 '+(p*100).toFixed(0)+'% win est. \u00B7 Max capital preservation';
     if(call==='HOLD')return{amt:0,frac:0,note:'Safe mode: no bet on HOLD signals',edge:edge}
   }else{
-    // Half Kelly — balanced risk/reward
-    mult=0.45;label='Half Kelly';
-    note=label+' \u00B7 '+(p*100).toFixed(0)+'% win est. \u00B7 Optimal risk-adjusted';
+    mult=0.35;label='Third Kelly'; // reduced from 0.45 — consistency over frequency
+    note=label+' \u00B7 '+(p*100).toFixed(0)+'% win est. \u00B7 Risk-adjusted optimal';
   }
 
-  var frac=edge*mult;
+  var frac=edge*mult*throttle; // apply drawdown throttle
   var amt=Math.round(bank*frac);
   amt=clamp(amt,0,bank);
+  // Append risk context
+  if(throttle<1.0)note+=' \u00B7 DD throttle: '+(throttle*100).toFixed(0)+'%';
+  if(S.risk.currentDD>0.05)note+=' \u00B7 DD: '+(S.risk.currentDD*100).toFixed(1)+'%';
   return{amt:amt,frac:(frac*100).toFixed(1),note:note,edge:edge}
 }
 
