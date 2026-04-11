@@ -215,13 +215,9 @@ body{
 .bet-conv-lbl{font-size:7px;font-weight:600;letter-spacing:.1em;color:var(--t4);margin-left:8px}
 .bet-rationale{margin-top:8px;text-align:left;padding:0 4px}
 .bet-rationale .rd-bullet{font-size:8px;color:var(--t3);line-height:1.7;font-weight:400}
-.bet-market-warn{margin-top:8px;padding:6px 10px;border-radius:6px;font-size:8px;font-weight:600;letter-spacing:.04em;background:rgba(255,170,0,0.08);border:1px solid rgba(255,170,0,0.2);color:var(--o)}
-.reeval-btn{
-  margin-top:10px;padding:7px 16px;border:1px solid rgba(86,212,245,0.2);background:rgba(86,212,245,0.06);
-  color:var(--b);border-radius:16px;font-size:8px;font-weight:700;letter-spacing:.1em;
-  cursor:pointer;transition:all .3s;font-family:inherit
-}
-.reeval-btn:hover{background:rgba(86,212,245,0.12);border-color:rgba(86,212,245,0.35)}
+.bet-market-warn{margin-top:8px;padding:6px 10px;border-radius:6px;font-size:8px;font-weight:600;letter-spacing:.04em;border:1px solid rgba(255,170,0,0.2);color:var(--o)}
+.bet-market-warn.confirmed{background:rgba(0,232,123,0.06);border-color:rgba(0,232,123,0.2);color:var(--g)}
+.bet-market-warn.flipped{background:rgba(255,170,0,0.08);border-color:rgba(255,170,0,0.25);color:var(--o)}
 .rd-locked-tag{display:inline-block;font-size:7px;font-weight:700;letter-spacing:.1em;padding:2px 8px;border-radius:4px;margin-left:8px}
 
 /* Lock Inner (inside signal card) */
@@ -411,7 +407,6 @@ body{
     <div class="bet-conv" id="betConv"></div>
     <div class="bet-rationale" id="betRationale"></div>
     <div class="bet-market-warn" id="betMarketWarn" style="display:none"></div>
-    <button class="reeval-btn" id="reevalBtn" onclick="forceReeval()" style="display:none">&#x1F504; RE-EVALUATE &amp; OVERRIDE</button>
   </div>
   <div class="tgt-analysis" id="tgtAnalysis" style="display:none">
     <div class="stl">TARGET PRICE ANALYSIS</div>
@@ -566,11 +561,10 @@ function setMode(m){
   S.roundDecision=null;S.roundDecisionPrice=null;
 }
 
-/* ======== FORCE RE-EVALUATE — user-initiated override ======== */
+/* ======== AUTO RE-EVALUATE — triggers when market moves significantly ======== */
 function forceReeval(){
   if(!S.analysis||!S.price)return;
-  var rd=getDecision(S.mode,{analysis:S.analysis,price:S.price},true);
-  render(); // immediately re-render with new decision
+  getDecision(S.mode,{analysis:S.analysis,price:S.price},true);
 }
 
 /* ======== INDICATORS ======== */
@@ -1978,11 +1972,17 @@ function getDecision(style,inputs,forceOverride){
   return dec;
 }
 
-/** Check if market has moved significantly since decision was locked */
-function checkMarketMoved(){
+/** Auto re-evaluate if market moved enough since decision lock */
+function checkAndAutoReeval(){
   if(!S.roundDecision||S.roundDecision.noTrade||!S.price||!S.roundDecisionPrice)return null;
   var pctMove=Math.abs(S.price-S.roundDecisionPrice)/S.roundDecisionPrice;
-  if(pctMove>0.003)return{moved:true,pct:(pctMove*100).toFixed(2),price:S.roundDecisionPrice}; // >0.3% move
+  if(pctMove>0.003){ // >0.3% move triggers auto re-eval
+    var oldDir=S.roundDecision.direction;
+    forceReeval();
+    var newDir=S.roundDecision.direction;
+    var flipped=oldDir!==newDir;
+    return{reeval:true,pct:(pctMove*100).toFixed(2),oldPrice:S.roundDecisionPrice,flipped:flipped,oldDir:oldDir,newDir:newDir};
+  }
   return null;
 }
 
@@ -2190,22 +2190,18 @@ function render(){
     dirEl.style.color=lockedDir==='ABOVE'?CL.g:CL.r;
     var convLabels=['','Forming thesis...','Building position...','Growing confidence','Strong conviction','Maximum conviction \u2014 full deploy'];
     $('betNote').textContent=bs.note+' \u2014 '+convLabels[S.betConviction];
-    $('reevalBtn').style.display='';
   }else if(rd&&rd.noTrade&&bank>0){
     $('betAmt').textContent='$--';$('betAmt').style.color=CL.t3;
     dirEl.textContent='NO TRADE THIS ROUND';dirEl.style.color=CL.o;
     $('betNote').textContent=rd.rationale?rd.rationale[0]:'Edge below threshold \u2014 standing aside';
-    $('reevalBtn').style.display='';
   }else if(bank>0&&curDir){
     $('betAmt').textContent='$--';$('betAmt').style.color=CL.o;
     dirEl.textContent='LEAN '+(curDir==='ABOVE'?'\u25B2 ABOVE':'\u25BC BELOW')+' '+tgt+' \u2014 awaiting lock';dirEl.style.color=CL.t3;
     $('betNote').textContent='Building conviction before committing to round decision';
-    $('reevalBtn').style.display='none';
   }else{
     $('betAmt').textContent='$--';$('betAmt').style.color=CL.b;
     dirEl.textContent='';
     $('betNote').textContent=bank<=0?'Enter bankroll for AI bet sizing':'Waiting for signal...';
-    $('reevalBtn').style.display='none';
   }
 
   // Rationale bullets from round decision
@@ -2226,12 +2222,18 @@ function render(){
     ratEl.innerHTML='';
   }
 
-  // Market-moved warning
-  var mmWarn=checkMarketMoved();
+  // Auto re-evaluate if market moved significantly
+  var mmResult=checkAndAutoReeval();
   var mmEl=$('betMarketWarn');
-  if(mmWarn){
+  if(mmResult){
     mmEl.style.display='';
-    mmEl.textContent='\u26A0\uFE0F Market moved '+mmWarn.pct+'% since decision was locked (from '+fmt$(mmWarn.price,0)+'). Consider re-evaluating manually.';
+    if(mmResult.flipped){
+      mmEl.className='bet-market-warn flipped';
+      mmEl.textContent='\u26A0\uFE0F Auto re-evaluated: market moved '+mmResult.pct+'%. Decision flipped from '+mmResult.oldDir+' to '+mmResult.newDir+'.';
+    }else{
+      mmEl.className='bet-market-warn confirmed';
+      mmEl.textContent='\u2705 Auto re-evaluated after '+mmResult.pct+'% move \u2014 decision confirmed: '+mmResult.newDir+'.';
+    }
   }else{
     mmEl.style.display='none';
   }
