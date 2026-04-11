@@ -242,6 +242,22 @@ body{
 .mc-why{font-size:8px;color:var(--t3);margin-top:4px;line-height:1.5;font-weight:400}
 .mc-tag{display:inline-block;font-size:7px;font-weight:700;letter-spacing:.08em;padding:2px 6px;border-radius:3px;margin-top:4px}
 
+/* === TARGET PRICE ANALYSIS === */
+.tgt-analysis{
+  margin-top:14px;padding:16px;border-radius:var(--radius-sm);text-align:center;
+  background:rgba(12,18,32,0.55);border:1px solid rgba(60,80,120,0.15);
+  -webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px)
+}
+.tgt-dir{font-size:26px;font-weight:900;margin:8px 0 4px;transition:color .3s}
+.tgt-prob{font-size:13px;font-weight:700;margin-bottom:4px}
+.tgt-conf-tag{
+  display:inline-block;font-size:8px;font-weight:700;letter-spacing:.1em;
+  padding:3px 10px;border-radius:4px;margin-bottom:10px
+}
+.tgt-rationale{text-align:left;font-size:10px;color:var(--t2);line-height:1.7}
+.tgt-rationale .tgt-bullet{padding:3px 0;border-bottom:1px solid rgba(50,70,110,0.08)}
+.tgt-rationale .tgt-bullet:last-child{border-bottom:none}
+
 /* === GENIE ANALYSIS === */
 .genie-text{font-size:11px;color:var(--t2);line-height:1.7;letter-spacing:.015em;font-weight:400}
 .genie-logs{max-height:78px;overflow-y:auto;margin-top:10px}
@@ -381,6 +397,13 @@ body{
     <div class="bet-amt" id="betAmt">$--</div>
     <div class="bet-note" id="betNote">Set bankroll to receive AI bet sizing</div>
     <div class="bet-conv" id="betConv"></div>
+  </div>
+  <div class="tgt-analysis" id="tgtAnalysis" style="display:none">
+    <div class="stl">TARGET PRICE ANALYSIS</div>
+    <div class="tgt-dir" id="tgtDir">--</div>
+    <div class="tgt-prob" id="tgtProb"></div>
+    <div class="tgt-conf-tag" id="tgtConfTag"></div>
+    <div class="tgt-rationale" id="tgtRationale"></div>
   </div>
 </div>
 
@@ -1460,6 +1483,244 @@ function genieText(){
   return pts.join(' ')
 }
 
+/* ======== TARGET PRICE CLASSIFICATION — analyzeTargetPrice sub-module ======== */
+/**
+ * Exhaustive analysis of whether BTC will close ABOVE or BELOW a user‑supplied
+ * target price by the end of the current 15‑minute Kalshi window.
+ *
+ * Pure function — all inputs via arguments, all outputs via return value.
+ *
+ * @param {number}   currentPrice       Latest composite BTC price
+ * @param {number}   targetPrice        User‑entered strike / target price
+ * @param {number}   secondsToExpiry    Seconds remaining in the 15‑min window
+ * @param {number[]} recentPriceSeries  Recent 1‑second price ticks (newest last)
+ * @param {object}   [context]          Optional bag: {ind, ind15m, ob, dse, traj, regime}
+ * @returns {{direction:"ABOVE"|"BELOW", probability:number, rationale:string[], confidenceLevel:"low"|"medium"|"high"}}
+ */
+function analyzeTargetPrice(currentPrice,targetPrice,secondsToExpiry,recentPriceSeries,context){
+  var ctx=context||{};
+  var ind=ctx.ind||{};
+  var ind15m=ctx.ind15m||{};
+  var ob=ctx.ob||{imb:0};
+  var dse=ctx.dse||{};
+  var traj=ctx.traj||{};
+  var n=recentPriceSeries.length;
+  var rationale=[];
+
+  // ── 1. Distance & Drift ──────────────────────────────────────────────
+  var diff=currentPrice-targetPrice;
+  var pctDist=(diff/targetPrice)*100;
+  var aboveBias=diff>0?1:-1; // +1 if currently above target
+
+  // ── 2. Short‑term momentum (last 10, 30, 60 ticks) ──────────────────
+  function avgReturn(len){
+    if(n<len+1)return 0;
+    var s=0;for(var i=n-len;i<n;i++)s+=(recentPriceSeries[i]-recentPriceSeries[i-1]);
+    return s/len;
+  }
+  var mom10=avgReturn(Math.min(10,n-1));
+  var mom30=avgReturn(Math.min(30,n-1));
+  var mom60=avgReturn(Math.min(60,n-1));
+  var momDir=(mom10*3+mom30*2+mom60)/6; // weighted composite
+
+  // ── 3. Micro‑volatility (rolling σ of returns) ───────────────────────
+  var rets=[];
+  for(var i=Math.max(1,n-60);i<n;i++){rets.push((recentPriceSeries[i]-recentPriceSeries[i-1])/recentPriceSeries[i-1])}
+  var retMean=rets.reduce(function(a,b){return a+b},0)/(rets.length||1);
+  var retVar=rets.reduce(function(a,b){return a+(b-retMean)*(b-retMean)},0)/(rets.length||1);
+  var sigma=Math.sqrt(retVar);
+
+  // ── 4. Time‑scaled projected move ───────────────────────────────────
+  var minutesLeft=secondsToExpiry/60;
+  var ticksPerMin=n>60?60:Math.max(n/((Date.now()-ctx._startTs||1)/60000),1);
+  var projectedDrift=momDir*minutesLeft*ticksPerMin;
+  var projectedPrice=currentPrice+projectedDrift;
+  var projAbove=projectedPrice>targetPrice;
+
+  // ── 5. Linear regression extrapolation ──────────────────────────────
+  var regN=Math.min(n,120);
+  var sl=recentPriceSeries.slice(-regN);
+  var sx=0,sy=0,sxy=0,sxx=0;
+  for(var ri=0;ri<regN;ri++){sx+=ri;sy+=sl[ri];sxy+=ri*sl[ri];sxx+=ri*ri}
+  var regSlope=(regN*sxy-sx*sy)/(regN*sxx-sx*sx||1);
+  var regIntercept=(sy-regSlope*sx)/regN;
+  var regProj=regIntercept+regSlope*(regN+minutesLeft*ticksPerMin);
+  var regAbove=regProj>targetPrice;
+
+  // ── 6. Mean reversion vs trend detection ────────────────────────────
+  var halfLife=0;
+  if(n>=30){
+    // Ornstein‑Uhlenbeck proxy: autocorrelation of demeaned returns
+    var dm=[];for(var di=0;di<rets.length;di++)dm.push(rets[di]-retMean);
+    var ac=0,ac0=0;
+    for(var di=1;di<dm.length;di++){ac+=dm[di]*dm[di-1];ac0+=dm[di-1]*dm[di-1]}
+    var rho=ac0>0?ac/ac0:0;
+    halfLife=rho>0&&rho<1?-Math.log(2)/Math.log(rho):999;
+  }
+  var isMeanReverting=halfLife>0&&halfLife<minutesLeft*ticksPerMin;
+
+  // If mean‑reverting AND currently stretched away from a local mean, bias
+  // toward reversion to the mean (which may be nearer the target)
+  var localMean=0;
+  var lookback=Math.min(n,120);
+  for(var mi=n-lookback;mi<n;mi++)localMean+=recentPriceSeries[mi];
+  localMean/=lookback;
+  var reversionBias=0;
+  if(isMeanReverting){
+    var distFromMean=currentPrice-localMean;
+    // If mean is closer to target from the other side, reversion hurts our side
+    reversionBias=(localMean>targetPrice?1:-1)*0.3*Math.min(1,Math.abs(distFromMean)/(sigma*currentPrice*100+1));
+  }
+
+  // ── 7. Indicator scores (from existing engine) ──────────────────────
+  var indScore=0;
+  // EMA trend
+  if(ind.e9&&ind.e21){indScore+=(ind.e9>ind.e21?1:-1)*0.3}
+  // RSI bias
+  if(ind.r14!==null){
+    if(ind.r14>55)indScore+=0.2;
+    else if(ind.r14<45)indScore-=0.2;
+    if(ind.r14>70)indScore+=0.15; // overbought momentum
+    else if(ind.r14<30)indScore-=0.15; // oversold momentum
+  }
+  // MACD
+  if(ind.mc){indScore+=(ind.mc.hist>0?0.2:-0.2);if(ind.mc.crossUp)indScore+=0.15;if(ind.mc.crossDown)indScore-=0.15}
+  // Stoch RSI
+  if(ind.sr){if(ind.sr.k>65)indScore+=0.1;else if(ind.sr.k<35)indScore-=0.1}
+  // Order book imbalance
+  if(ob.imb)indScore+=ob.imb*0.4;
+  // Bollinger %B — position in the band
+  if(ind.bl){indScore+=(ind.bl.pctB-0.5)*0.3}
+  // Trend strength
+  if(ind.tStr){indScore+=(ind.tStr>50?0.15:-0.1)*(ind.e9>ind.e21?1:-1)}
+
+  // ── 8. Higher timeframe alignment (15m) ─────────────────────────────
+  var htfBias=0;
+  if(ind15m&&ind15m.e9&&ind15m.e21){
+    htfBias=(ind15m.e9>ind15m.e21?1:-1)*0.2;
+    if(ind15m.r14!==null){
+      if(ind15m.r14>60)htfBias+=0.1;else if(ind15m.r14<40)htfBias-=0.1;
+    }
+  }
+
+  // ── 9. DSE Bayesian posterior integration ───────────────────────────
+  var dseBias=0;
+  if(dse.probAbove!==undefined&&dse.entropy<0.8){
+    dseBias=(dse.probAbove-0.5)*0.5*(1-dse.entropy); // stronger when low entropy
+  }
+
+  // ── 10. Trajectory model integration ────────────────────────────────
+  var trajBias=0;
+  if(traj&&traj.proj){
+    trajBias=(traj.proj>targetPrice?1:-1)*0.2*Math.min(1,traj.conf/80);
+  }
+
+  // ── 11. Time decay factor ───────────────────────────────────────────
+  // Less time = more weight on current position, less on momentum
+  var timeFactor=clamp(minutesLeft/15,0.05,1);
+  var positionWeight=1.5*(1-timeFactor*0.5); // heavier when close to expiry
+  var momentumWeight=timeFactor; // lighter when close to expiry
+
+  // ── COMPOSITE SCORE ─────────────────────────────────────────────────
+  // Positive = favors ABOVE, negative = favors BELOW
+  var composite=0;
+  // Current position relative to target (strongest signal near expiry)
+  composite+=aboveBias*Math.min(Math.abs(pctDist)*8,3)*positionWeight;
+  // Momentum projection
+  composite+=(projAbove?1:-1)*0.8*momentumWeight;
+  // Regression projection
+  composite+=(regAbove?1:-1)*0.6*momentumWeight;
+  // Mean reversion
+  composite+=reversionBias;
+  // Technical indicators
+  composite+=indScore;
+  // Higher timeframe
+  composite+=htfBias;
+  // DSE posterior
+  composite+=dseBias;
+  // Trajectory model
+  composite+=trajBias;
+
+  // ── DIRECTION & PROBABILITY ─────────────────────────────────────────
+  var direction=composite>=0?'ABOVE':'BELOW';
+  // Sigmoid mapping: composite → probability in (0.5, ~0.98)
+  var absComp=Math.abs(composite);
+  var rawProb=1/(1+Math.exp(-absComp*0.7));
+  // Clamp to [0.50, 0.97] — never claim certainty
+  var probability=Math.max(0.50,Math.min(0.97,rawProb));
+
+  // Volatility discount — high σ widens uncertainty
+  var volDiscount=sigma>0.001?Math.min(0.12,sigma*30):0;
+  probability=Math.max(0.50,probability-volDiscount);
+
+  // Time remaining discount — more time = less certain
+  var timeDiscount=minutesLeft>10?0.04:minutesLeft>5?0.02:0;
+  probability=Math.max(0.50,probability-timeDiscount);
+
+  // ── CONFIDENCE LEVEL ────────────────────────────────────────────────
+  var confidenceLevel;
+  if(probability>=0.65)confidenceLevel='high';
+  else if(probability>=0.55)confidenceLevel='medium';
+  else confidenceLevel='low';
+
+  // ── RATIONALE BULLETS ───────────────────────────────────────────────
+  // 1. Current position
+  if(Math.abs(pctDist)>0.02){
+    rationale.push('BTC currently '+fmt$(currentPrice)+', '+(diff>0?'+':'')+pctDist.toFixed(3)+'% '+(diff>0?'above':'below')+' the '+fmt$(targetPrice,0)+' target'+(minutesLeft<3?' — with <3 min left, position is dominant':'.'));
+  }else{
+    rationale.push('Price sitting right at the target ('+pctDist.toFixed(3)+'% away) — razor-thin edge, could go either way.');
+  }
+
+  // 2. Momentum
+  var momLabel=momDir>0?'upward':'downward';
+  if(Math.abs(momDir)>0.05){
+    rationale.push('Short-term momentum is '+momLabel+' (10s: '+(mom10>0?'+':'')+mom10.toFixed(2)+'/tick) — favors '+(momDir>0?'ABOVE':'BELOW')+'.');
+  }else{
+    rationale.push('Momentum is flat — no directional thrust in recent ticks.');
+  }
+
+  // 3. Volatility assessment
+  var volAnnual=(sigma*Math.sqrt(365*24*60*60)).toFixed(1);
+  if(sigma>0.0005){
+    rationale.push('Micro-volatility is elevated (\u03C3='+sigma.toFixed(6)+') — '+(minutesLeft>5?'enough time for a reversal, adding uncertainty':'price could still swing meaningfully')+'.');
+  }else{
+    rationale.push('Low volatility environment — price is sticky, current position likely holds.');
+  }
+
+  // 4. Mean reversion or trend
+  if(isMeanReverting&&Math.abs(currentPrice-localMean)>sigma*currentPrice*50){
+    rationale.push('Mean-reversion detected (half-life \u2248'+halfLife.toFixed(0)+' ticks) — stretched '+((currentPrice>localMean)?'above':'below')+' local mean, may pull '+(currentPrice>localMean?'down.':'up.'));
+  }else if(!isMeanReverting&&Math.abs(regSlope)>0.1){
+    rationale.push('Trending regime — regression slope '+(regSlope>0?'positive':'negative')+', '+(regSlope>0?'ABOVE':'BELOW')+' bias persists.');
+  }
+
+  // 5. Higher timeframe & indicator context
+  var indDir=indScore>0?'bullish':'bearish';
+  if(Math.abs(indScore)>0.3){
+    rationale.push('Technical indicators lean '+indDir+' (EMA/RSI/MACD composite'+(htfBias!==0?', 15M macro '+((htfBias>0)?'aligned':'divergent'):'')+').');
+  }
+
+  // 6. Key risk
+  if(confidenceLevel==='low'){
+    rationale.push('Edge is razor-thin (prob '+Math.round(probability*100)+'%) — treat as a coin flip with a slight lean.');
+  }else if(sigma>0.0006&&minutesLeft>5){
+    rationale.push('Risk: elevated volatility with '+minutesLeft.toFixed(0)+' min remaining — reversal is plausible.');
+  }else if(Math.abs(pctDist)<0.03){
+    rationale.push('Risk: price hugging the strike — any micro-move could flip the outcome.');
+  }
+
+  // Ensure 3-6 bullets
+  while(rationale.length<3)rationale.push('Edge is small — proceed with caution.');
+  if(rationale.length>6)rationale=rationale.slice(0,6);
+
+  return{
+    direction:direction,
+    probability:Math.round(probability*1000)/1000,
+    rationale:rationale,
+    confidenceLevel:confidenceLevel
+  }
+}
+
 /* ======== BET SIZING — MODE-ADAPTIVE KELLY CRITERION ======== */
 function betSize(bank,conf,mode,call){
   if(!bank||bank<=0||conf<=0)return{amt:0,frac:0,note:'',edge:0};
@@ -1707,6 +1968,31 @@ function render(){
       callEl.textContent='--';callEl.style.color=CL.t3;
       confEl.textContent='';whyEl.textContent='Analyzing...'
     }
+  }
+
+  // Target Price Analysis — runs when user enters a target
+  var userTarget=parseFloat(($('inTarget')||{}).value)||0;
+  var tgtEl=$('tgtAnalysis');
+  if(userTarget>0&&p&&S.hist.length>=30){
+    var tpa=analyzeTargetPrice(p,userTarget,S.kal.tl,S.hist,{
+      ind:ind,ind15m:S.ind15m,ob:ob,dse:S.dse,traj:S.traj
+    });
+    tgtEl.style.display='';
+    $('tgtDir').textContent=tpa.direction;
+    $('tgtDir').style.color=tpa.direction==='ABOVE'?CL.g:CL.r;
+    $('tgtProb').textContent=Math.round(tpa.probability*100)+'% probability';
+    $('tgtProb').style.color=tpa.direction==='ABOVE'?CL.g:CL.r;
+    var tagEl=$('tgtConfTag');
+    tagEl.textContent=tpa.confidenceLevel.toUpperCase()+' CONFIDENCE';
+    tagEl.style.background=tpa.confidenceLevel==='high'?CL.g+'20':tpa.confidenceLevel==='medium'?CL.y+'20':CL.o+'20';
+    tagEl.style.color=tpa.confidenceLevel==='high'?CL.g:tpa.confidenceLevel==='medium'?CL.y:CL.o;
+    var bhtml='';
+    for(var bi=0;bi<tpa.rationale.length;bi++){
+      bhtml+='<div class="tgt-bullet">\u2022 '+escH(tpa.rationale[bi])+'</div>';
+    }
+    $('tgtRationale').innerHTML=bhtml;
+  }else{
+    tgtEl.style.display='none'
   }
 
   // GENIE text
