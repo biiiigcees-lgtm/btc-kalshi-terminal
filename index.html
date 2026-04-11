@@ -271,6 +271,7 @@ var S = {
   lockDir:null, lockConf:0, lockTime:null, lockSamples:[],
   logs:[], genieText:'Initializing GENIE AI engine...', mode:'balanced',
   betHistory:[], betConviction:0, betStableDir:null, betStableCount:0,
+  hist15m:[], ind15m:null,
   _lhp:0, _lktl:900, _chartDirty:true
 };
 var ws=null, wsRT=null;
@@ -518,7 +519,7 @@ function trajectory(d,tl){
 
 /* ======== SIGNAL ENGINE — ELITE GENIUS ======== */
 function analyze(opts){
-  var pr=opts.price,strike=opts.strike,ind=opts.ind,kal=opts.kal,obImb=opts.obImb,mode=opts.mode,traj=opts.traj;
+  var pr=opts.price,strike=opts.strike,ind=opts.ind,ind15m=opts.ind15m,kal=opts.kal,obImb=opts.obImb,mode=opts.mode,traj=opts.traj;
   if(!pr||!ind||!strike)return null;
 
   var regime=ind.regime;
@@ -591,12 +592,36 @@ function analyze(opts){
 
   score+=clamp(divScore,-0.8,0.8)*W.diverge;
 
-  // 8. TIMING GATE
+  // 8. HTF CONFIRMATION — 15-minute chart analysis for macro context (max ±1.5)
+  var htfScore=0,htfLabel='NO DATA',htfType='neu';
+  if(ind15m){
+    // 15m trend direction
+    if(ind15m.e9&&ind15m.e21){
+      var htfBull=ind15m.e9>ind15m.e21;htfScore+=(htfBull?0.6:-0.6);
+      if(ind15m.e50){var htfAligned=htfBull?(ind15m.e9>ind15m.e21&&ind15m.e21>ind15m.e50):(ind15m.e9<ind15m.e21&&ind15m.e21<ind15m.e50);if(htfAligned)htfScore+=(htfBull?0.3:-0.3)}
+    }
+    // 15m RSI confirmation
+    if(ind15m.r14!==null){if(ind15m.r14>55)htfScore+=0.2;else if(ind15m.r14<45)htfScore-=0.2}
+    // 15m MACD confirmation
+    if(ind15m.mc){if(ind15m.mc.hist>0)htfScore+=0.2;else htfScore-=0.2}
+    // 15m regime context
+    if(ind15m.regime==='trending_up')htfScore+=0.2;else if(ind15m.regime==='trending_down')htfScore-=0.2;
+    htfLabel=htfScore>0.3?'BULLISH 15M':htfScore<-0.3?'BEARISH 15M':'NEUTRAL 15M';
+    htfType=htfScore>0.3?'up':htfScore<-0.3?'dn':'neu';
+    // HTF alignment bonus: if 1m and 15m agree, boost; if they disagree, dampen
+    var agree=(score>0&&htfScore>0)||(score<0&&htfScore<0);
+    if(agree)score*=1.15; // 15% confidence boost for aligned timeframes
+    else if(Math.abs(htfScore)>0.4)score*=0.8; // dampen if 15m contradicts
+  }
+  signals.push({name:'15M Trend',val:htfLabel,type:htfType});
+  score+=clamp(htfScore,-1.5,1.5);
+
+  // 9. TIMING GATE
   var timingOk=kal.phase==='early'||kal.phase==='mid';
   if(!timingOk)score*=0.3;
   signals.push({name:'Timing Gate',val:timingOk?'ENTRY OK':'LATE \u2014 CAUTION',type:timingOk?'up':'dn'});
 
-  // 9. STRIKE DISTANCE psychology
+  // 10. STRIKE DISTANCE psychology
   var stDist=pr-strike,stPct=Math.abs(stDist)/pr*100;
   var stLabel=stDist>=0?'+'+fmt$(stDist,0)+' above':fmt$(Math.abs(stDist),0)+' below';
   signals.push({name:'Strike Distance',val:stLabel,type:stDist>=0?'up':'dn'});
@@ -608,6 +633,14 @@ function analyze(opts){
   // Each mode is a fundamentally different quant strategy, not just a risk slider
   var maxS=9.5;
   var rawConf=clamp(Math.round((Math.abs(score)/maxS)*100),0,98);
+
+  // 15m alignment context for mode reasoning
+  var htfNote='';
+  if(ind15m&&ind15m.e9&&ind15m.e21){
+    var h15Bull=ind15m.e9>ind15m.e21;
+    var aligned1m15m=ind.e9&&ind.e21&&((ind.e9>ind.e21)===h15Bull);
+    htfNote=aligned1m15m?' 15M chart confirms — multi-timeframe alignment.':(h15Bull?' 15M trend bullish, watching for 1M alignment.':' 15M trend bearish, 1M may catch up.');
+  }
 
   var call,reason,modeConf,modeReason,modePriceBias;
 
@@ -623,8 +656,8 @@ function analyze(opts){
     else{call='HOLD';reason='No clear momentum edge — standing aside'}
     modeReason=call!=='HOLD'?'Momentum-capture strategy: early entry on directional signals. '+
       (ind.mc&&ind.mc.crossUp?'Fresh MACD cross amplifies conviction. ':ind.mc&&ind.mc.crossDown?'MACD bearish cross confirms selling pressure. ':'')+
-      'Regime: '+ind.regime.replace('_',' ')+'. Risk-on approach targeting maximum edge extraction.':
-      'Waiting for strong directional catalyst. Even aggressive mode requires quantifiable momentum before deploying capital.'
+      'Regime: '+ind.regime.replace('_',' ')+'.'+htfNote+' Risk-on approach targeting maximum edge extraction.':
+      'Waiting for strong directional catalyst.'+htfNote+' Even aggressive mode requires quantifiable momentum before deploying capital.'
 
   }else if(mode==='safe'){
     // SAFE: Capital preservation quant — only trades ironclad setups, multiple confirmations required
@@ -648,7 +681,7 @@ function analyze(opts){
     modeReason=call!=='HOLD'?'Capital preservation strategy: '+Math.max(strongUp,strongDn)+'/4 category confirmations aligned. '+
       'Trend, oscillators, momentum'+(Math.max(strongUp,strongDn)>=4?', and order flow all':'')+ ' in agreement. '+
       (regimePenalty<1?'Regime penalty applied ('+ind.regime.replace('_',' ')+') — still cleared threshold.':'Clean regime for entry.')+
-      ' High-probability, low-risk setup.':
+      htfNote+' High-probability, low-risk setup.':
       'Capital preservation mode requires 3+ aligned signal categories and score threshold of '+sThresh.toFixed(1)+'. '+
       'Currently: '+(Math.max(strongUp,strongDn))+' aligned categories, raw score '+Math.abs(sScore).toFixed(1)+'. '+
       (regimePenalty<1?'Regime ('+ind.regime.replace('_',' ')+') adding caution. ':'')+'Patience is the edge here.'
@@ -663,7 +696,7 @@ function analyze(opts){
     else{call='HOLD';reason='Insufficient edge — standing aside this round'}
     modeReason=call!=='HOLD'?'Balanced quant approach: weighting trend, oscillators, momentum, volatility, flow, trajectory, and divergence equally. '+
       'Score '+Math.abs(score).toFixed(1)+' exceeds threshold '+bThresh+'. '+
-      'Regime: '+ind.regime.replace('_',' ')+'. Optimal risk/reward ratio for deployment.':
+      'Regime: '+ind.regime.replace('_',' ')+'.'+htfNote+' Optimal risk/reward ratio for deployment.':
       'Balanced analysis shows score '+Math.abs(score).toFixed(1)+' vs threshold '+bThresh+'. '+
       'Signal not yet strong enough across categories. Watching for convergence.'
   }
@@ -758,6 +791,25 @@ function genieText(){
   if(S.traj&&a&&a.projPrice){
     var pSide=a.projPrice>strike?'above':'below';
     pts.push('Projected close: '+fmt$(a.projPrice,0)+' ('+pSide+' strike, '+S.traj.conf.toFixed(0)+'% model fit).');
+  }
+
+  // 15-minute higher timeframe analysis
+  var i15=S.ind15m;
+  if(i15){
+    var htfDir='neutral';
+    if(i15.e9&&i15.e21){htfDir=i15.e9>i15.e21?'bullish':'bearish'}
+    var htfReg=i15.regime.replace('_',' ');
+    var agree1m=ind.e9&&ind.e21&&i15.e9&&i15.e21&&((ind.e9>ind.e21)===(i15.e9>i15.e21));
+    if(mode==='aggressive'){
+      pts.push('15M macro: '+htfDir+' ('+htfReg+'). '+(agree1m?'1M and 15M aligned \u2014 full conviction, riding the trend.':'1M/15M divergence detected \u2014 '+htfDir+' macro bias may override short-term noise.'));
+    }else if(mode==='safe'){
+      pts.push('15M macro: '+htfDir+' ('+htfReg+'). '+(agree1m?'Multi-timeframe alignment confirmed \u2014 safe entry criteria strengthened.':'CAUTION: 15M trend contradicts 1M \u2014 safe mode requires alignment, reducing conviction.'));
+    }else{
+      pts.push('15M macro context: '+htfDir+' trend in '+htfReg+' regime. '+(agree1m?'Timeframes aligned \u2014 higher confidence setup.':'Timeframe divergence \u2014 waiting for alignment before full deployment.'));
+    }
+    if(i15.r14!==null)pts.push('15M RSI: '+i15.r14.toFixed(0)+' '+(i15.r14>60?'\u2014 macro buying pressure':i15.r14<40?'\u2014 macro selling pressure':'\u2014 macro neutral')+'.');
+  }else{
+    pts.push('15M analysis: loading historical chart data for macro context...');
   }
 
   // Final call
@@ -1114,6 +1166,11 @@ function fetchKlines(){
     if(Array.isArray(d)&&d.length>0){S.hist=d.map(function(k){return parseFloat(k[4])});S._chartDirty=true}
   }).catch(function(){})
 }
+function fetchKlines15m(){
+  return fetch('https://api.binance.us/api/v3/klines?symbol=BTCUSDT&interval=15m&limit=96').then(function(r){return r.json()}).then(function(d){
+    if(Array.isArray(d)&&d.length>0){S.hist15m=d.map(function(k){return parseFloat(k[4])})}
+  }).catch(function(){})
+}
 
 function connectWS(){
   if(ws&&ws.readyState===WebSocket.OPEN)return;
@@ -1150,9 +1207,10 @@ function tick(){
   updateTimer();
   var strike=parseFloat(($('inTarget')||{}).value)||S.kal.open||(S.price?Math.round(S.price/500)*500:0);
   S.ind=computeInd(S.hist);
+  S.ind15m=S.hist15m.length>=26?computeInd(S.hist15m):null;
   S.traj=trajectory(S.hist,S.kal.tl);
   if(S.ind&&S.price&&strike){
-    S.analysis=analyze({price:S.price,strike:strike,ind:S.ind,kal:S.kal,obImb:S.ob.imb,mode:S.mode,traj:S.traj})
+    S.analysis=analyze({price:S.price,strike:strike,ind:S.ind,ind15m:S.ind15m,kal:S.kal,obImb:S.ob.imb,mode:S.mode,traj:S.traj})
   }
   updateLock();render()
 }
@@ -1178,14 +1236,16 @@ function init(){
   setupChart();chartLoop();
   window.addEventListener('resize',function(){setupChart()});
 
-  Promise.all([fetchKlines(),fetchSpot(),fetch24h()]).then(function(){
+  Promise.all([fetchKlines(),fetchKlines15m(),fetchSpot(),fetch24h()]).then(function(){
     connectWS();startPoll();
     setInterval(fetch24h,12000);setInterval(fetchOB,2500);
+    setInterval(fetchKlines15m,120000);
     setInterval(tick,1000);setInterval(genieTick,4000);
     tick();setTimeout(genieTick,1500)
   }).catch(function(){
     connectWS();startPoll();
     setInterval(fetch24h,12000);setInterval(fetchOB,2500);
+    setInterval(fetchKlines15m,120000);
     setInterval(tick,1000);setInterval(genieTick,4000)
   })
 }
