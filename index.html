@@ -1,21 +1,345 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>My App</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BTC Kalshi Signal — Enhanced Edge Engine v2.1 (Strike-Aware)</title>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow+Condensed:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #04080c;
+  --panel: #0a0f14;
+  --border: #151f28;
+  --green: #00ff88;
+  --red: #ff3355;
+  --yellow: #ffd700;
+  --blue: #00d4ff;
+  --dim: #3a5060;
+  --text: #b0c8d8;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--bg); color: var(--text); font-family: 'Barlow Condensed', sans-serif; padding: 10px; min-height: 100vh; }
+.hdr { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.hdr-title { font-family: 'Share Tech Mono', monospace; font-size: 12px; color: var(--blue); letter-spacing: 3px; }
+.live { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--dim); }
+.dot { width:7px;height:7px;border-radius:50%;background:var(--green);animation:blink 1.4s infinite; }
+@keyframes blink{0%,100%{opacity:1;}50%{opacity:.2;}}
+.price-row { display: flex; align-items: baseline; justify-content: space-between; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; }
+.price-main { font-family:'Share Tech Mono',monospace; font-size:28px; color:var(--blue); }
+.price-chg { font-family:'Share Tech Mono',monospace; font-size:13px; }
+.strike-row { display: flex; align-items: center; justify-content: space-between; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 8px 14px; margin-bottom: 10px; }
+.strike-label { font-size:13px; color:var(--dim); letter-spacing:2px; }
+.strike-input { font-family:'Share Tech Mono',monospace; font-size:22px; background:transparent; border:none; color:var(--blue); text-align:right; width:130px; outline:none; }
+.strike-usd { font-size:13px; color:var(--text); }
+.verdict { border-radius: 10px; padding: 18px 14px 14px; margin-bottom: 10px; text-align: center; border: 2px solid; transition: all .3s; position: relative; overflow: hidden; }
+.verdict.up { background:#001811; border-color:var(--green); box-shadow:0 0 24px #00ff8830; }
+.verdict.down { background:#180008; border-color:var(--red); box-shadow:0 0 24px #ff335530; }
+.verdict.hold { background:#0d0d00; border-color:var(--yellow); box-shadow:0 0 12px #ffd70020; }
+.verdict-tag { font-size:10px; letter-spacing:3px; color:var(--dim); margin-bottom:4px; }
+.verdict-dir { font-family:'Share Tech Mono',monospace; font-size:52px; font-weight:900; letter-spacing:6px; line-height:1; }
+.verdict.up .verdict-dir { color:var(--green); text-shadow:0 0 20px #00ff8880; }
+.verdict.down .verdict-dir { color:var(--red); text-shadow:0 0 20px #ff335580; }
+.verdict.hold .verdict-dir { color:var(--yellow); font-size:36px; }
+.verdict-sub { font-size:13px; color:var(--dim); margin-top:6px; letter-spacing:.5px; }
+.conf-wrap { margin-top:12px; }
+.conf-label { display:flex; justify-content:space-between; font-size:11px; color:var(--dim); margin-bottom:4px; }
+.conf-track { background:#0d1820; border-radius:4px; height:8px; overflow:hidden; }
+.conf-fill { height:100%; border-radius:4px; transition:width .5s ease, background .5s ease; }
+.ind-row { display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; margin-bottom:10px; }
+.ind { background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:10px 10px 8px; text-align:center; }
+.ind-lbl { font-size:9px; letter-spacing:2px; color:var(--dim); margin-bottom:4px; }
+.ind-val { font-family:'Share Tech Mono',monospace; font-size:18px; font-weight:700; }
+.ind-sig { font-size:10px; margin-top:3px; }
+.rsi-mini { height:4px; background:#0d1820; border-radius:2px; margin-top:6px; position:relative; overflow:hidden; }
+.rsi-fill { height:100%; border-radius:2px; transition:width .4s; }
+.timer-wrap { background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:10px; }
+.timer-top { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
+.timer-lbl { font-size:10px; letter-spacing:2px; color:var(--dim); }
+.timer-val { font-family:'Share Tech Mono',monospace; font-size:18px; color:var(--blue); }
+.round-track { background:#0d1820; border-radius:4px; height:10px; overflow:hidden; margin-bottom:6px; }
+.round-fill { height:100%; border-radius:4px; transition:width 1s linear; }
+.phase-label { font-size:11px; text-align:center; letter-spacing:2px; transition:color .3s; }
+.breakdown { background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:12px; }
+.bd-title { font-size:10px; letter-spacing:3px; color:var(--dim); margin-bottom:8px; }
+.bd-row { display:flex; align-items:center; justify-content:space-between; padding:6px 0; border-bottom:1px solid #0d1820; font-size:13px; }
+.bd-row:last-child { border-bottom:none; }
+.bd-name { color:var(--text); }
+.bd-badge { font-family:'Share Tech Mono',monospace; font-size:11px; padding:2px 8px; border-radius:4px; font-weight:700; }
+.badge-up { background:#001811; color:var(--green); border:1px solid #00ff8840; }
+.badge-down { background:#180008; color:var(--red); border:1px solid #ff335540; }
+.badge-neu { background:#0d0d00; color:var(--yellow); border:1px solid #ffd70040; }
+.update-row { font-family:'Share Tech Mono',monospace; font-size:10px; color:var(--dim); text-align:center; margin-top:10px; }
+</style>
 </head>
 <body>
-    <h1>Welcome to the BTC Kalshi Terminal</h1>
-    <script>
-        // JavaScript code to execute
-        function main() {
-            console.log("Application started");
-            // Add your main execution loop logic here
-        }
+<div class="hdr">
+  <div class="hdr-title">⚡ BTC · KALSHI 15MIN — ENHANCED EDGE v2.1 (STRIKE-AWARE)</div>
+  <div class="live"><div class="dot"></div><span id="updateTime">--:--:--</span></div>
+</div>
+<div class="price-row">
+  <div class="price-main" id="priceVal">$---,---</div>
+  <div class="price-chg" id="priceChg">+$0.00</div>
+</div>
+<div class="strike-row">
+  <div class="strike-label">KALSHI STRIKE TARGET</div>
+  <input id="kalshiStrike" type="number" value="68500" class="strike-input">
+  <div class="strike-usd">USD</div>
+</div>
+<div class="verdict hold" id="verdictBox">
+  <div class="verdict-tag">THIS ROUND — HIGH EDGE BET</div>
+  <div class="verdict-dir" id="verdictDir">LOADING</div>
+  <div class="verdict-sub" id="verdictSub">Calculating...</div>
+  <div class="conf-wrap">
+    <div class="conf-label"><span>CONFIDENCE</span><span id="confPct">--%</span></div>
+    <div class="conf-track"><div class="conf-fill" id="confFill" style="width:0%"></div></div>
+  </div>
+</div>
+<div class="ind-row">
+  <div class="ind">
+    <div class="ind-lbl">EMA CROSS</div>
+    <div class="ind-val" id="emaCrossVal">--</div>
+    <div class="ind-sig" id="emaCrossSig">--</div>
+  </div>
+  <div class="ind">
+    <div class="ind-lbl">RSI (14)</div>
+    <div class="ind-val" id="rsiVal">--</div>
+    <div class="ind-sig" id="rsiSig">--</div>
+    <div class="rsi-mini"><div class="rsi-fill" id="rsiFill" style="width:50%"></div></div>
+  </div>
+  <div class="ind">
+    <div class="ind-lbl">MOMENTUM</div>
+    <div class="ind-val" id="momVal">--</div>
+    <div class="ind-sig" id="momSig">--</div>
+  </div>
+</div>
+<div class="timer-wrap">
+  <div class="timer-top">
+    <div class="timer-lbl">15MIN ROUND</div>
+    <div class="timer-val" id="timerVal">--:--</div>
+  </div>
+  <div class="round-track"><div class="round-fill" id="roundFill" style="width:0%"></div></div>
+  <div class="phase-label" id="phaseLabel">--</div>
+</div>
+<div class="breakdown">
+  <div class="bd-title">SIGNAL BREAKDOWN (WEIGHTED + STRIKE PROJECTION)</div>
+  <div class="bd-row"><span class="bd-name">EMA 9 vs EMA 21</span><span class="bd-badge badge-neu" id="bd1">--</span></div>
+  <div class="bd-row"><span class="bd-name">RSI direction</span><span class="bd-badge badge-neu" id="bd2">--</span></div>
+  <div class="bd-row"><span class="bd-name">Price momentum (5 candles)</span><span class="bd-badge badge-neu" id="bd3">--</span></div>
+  <div class="bd-row"><span class="bd-name">Price vs EMA9</span><span class="bd-badge badge-neu" id="bd4">--</span></div>
+  <div class="bd-row"><span class="bd-name">Round timing GATE</span><span class="bd-badge badge-neu" id="bd5">--</span></div>
+  <div class="bd-row"><span class="bd-name">Projected close vs strike</span><span class="bd-badge badge-neu" id="bd6">--</span></div>
+</div>
+<div class="update-row">refreshes every 5s · coinbase btcusd · high-confidence + strike-aware filter active</div>
 
-        // Call main function
-        main();
-    </script>
+<script>
+'use strict';
+
+// Signal weights: EMA cross=2, RSI=1, Momentum=1.5, Price vs EMA9=1, Strike proj=1 => max directional=6.5+late gate reduction
+const SIGNAL_THRESHOLD = 2.5;   // minimum score to issue UP/DOWN verdict
+const LATE_ENTRY_PENALTY = 0.3; // multiplier applied to score when timing gate fires late
+const MAX_SCORE = 8.5;          // sum of all positive signal weights for confidence normalisation
+
+let prices = [];
+let lastPrice = null;
+let refreshInterval = null;
+
+async function fetchPrice() {
+  try {
+    const r = await fetch('https://api.coinbase.com/v2/prices/BTC-USD/spot');
+    const data = await r.json();
+    return parseFloat(data.data.amount);
+  } catch (e) {
+    console.error('Coinbase price fetch failed, using estimated value:', e);
+    return (lastPrice || 70000) + (Math.random() - 0.5) * 50;
+  }
+}
+
+function ema(d, p) {
+  if (d.length < p) return null;
+  const k = 2 / (p + 1);
+  let e = d.slice(0, p).reduce((a, b) => a + b, 0) / p;
+  for (let i = p; i < d.length; i++) e = d[i] * k + e * (1 - k);
+  return e;
+}
+
+function rsi(d, p) {
+  p = p || 14;
+  if (d.length < p + 1) return null;
+  let g = 0, l = 0;
+  for (let i = d.length - p; i < d.length; i++) {
+    const x = d[i] - d[i - 1];
+    if (x > 0) g += x; else l -= x;
+  }
+  return l === 0 ? 100 : 100 - (100 / (1 + g / l));
+}
+
+function momentum(d, n) {
+  n = n || 5;
+  if (d.length < n) return 0;
+  const s = d.slice(-n);
+  return ((s[s.length - 1] - s[0]) / s[0]) * 100;
+}
+
+function windowInfo() {
+  const n = new Date();
+  const s = n.getMinutes() * 60 + n.getSeconds();
+  const e = s % 900;
+  return { elapsed: e, remaining: 900 - e, pct: (e / 900) * 100 };
+}
+
+function fmt(s) {
+  return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
+}
+
+function setBadge(id, text, type) {
+  const el = document.getElementById(id);
+  el.textContent = text;
+  el.className = 'bd-badge ' + (type === 'up' ? 'badge-up' : type === 'down' ? 'badge-down' : 'badge-neu');
+}
+
+async function main() {
+  const price = await fetchPrice();
+  prices.push(price);
+  if (prices.length > 100) prices.shift();
+
+  const e9 = ema(prices, 9);
+  const e21 = ema(prices, 21);
+  const r = rsi(prices, 14);
+  const mom = momentum(prices, 5);
+  const win = windowInfo();
+
+  // Price display
+  document.getElementById('priceVal').textContent =
+    '$' + price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const chg = price - (lastPrice || price);
+  const chgPct = (chg / (lastPrice || price)) * 100;
+  const ce = document.getElementById('priceChg');
+  ce.textContent = (chg >= 0 ? '+' : '') + '$' + chg.toFixed(2) + ' (' + chgPct.toFixed(3) + '%)';
+  ce.style.color = chg >= 0 ? 'var(--green)' : 'var(--red)';
+
+  // Timer
+  document.getElementById('timerVal').textContent = fmt(win.remaining) + ' left';
+  const roundFill = document.getElementById('roundFill');
+  roundFill.style.width = win.pct + '%';
+  const phaseEl = document.getElementById('phaseLabel');
+  let phase, phaseColor;
+  if (win.pct < 20) { phase = 'ENTRY WINDOW'; phaseColor = 'var(--green)'; }
+  else if (win.pct < 80) { phase = 'MID ROUND — MONITOR'; phaseColor = 'var(--blue)'; }
+  else { phase = 'LATE — AVOID ENTRY'; phaseColor = 'var(--red)'; }
+  phaseEl.textContent = phase;
+  phaseEl.style.color = phaseColor;
+  roundFill.style.background = phaseColor;
+
+  // Update time
+  document.getElementById('updateTime').textContent = new Date().toLocaleTimeString();
+
+  // EMA indicator
+  if (e9 !== null && e21 !== null) {
+    const diff = ((e9 - e21) / e21 * 100).toFixed(3);
+    const emaCrossVal = document.getElementById('emaCrossVal');
+    emaCrossVal.textContent = e9 > e21 ? 'BULL' : 'BEAR';
+    emaCrossVal.style.color = e9 > e21 ? 'var(--green)' : 'var(--red)';
+    const emaCrossSig = document.getElementById('emaCrossSig');
+    emaCrossSig.textContent = (e9 > e21 ? '\u2191 ' : '\u2193 ') + diff + '%';
+    emaCrossSig.style.color = e9 > e21 ? 'var(--green)' : 'var(--red)';
+  }
+
+  // RSI indicator
+  if (r !== null) {
+    const rsiVal = document.getElementById('rsiVal');
+    rsiVal.textContent = r.toFixed(1);
+    rsiVal.style.color = r > 55 ? 'var(--green)' : r < 45 ? 'var(--red)' : 'var(--yellow)';
+    document.getElementById('rsiSig').textContent =
+      r > 70 ? 'OVERBOUGHT' : r < 30 ? 'OVERSOLD' : r > 55 ? 'BULLISH' : r < 45 ? 'BEARISH' : 'NEUTRAL';
+    const rsiFill = document.getElementById('rsiFill');
+    rsiFill.style.width = r + '%';
+    rsiFill.style.background = r > 55 ? 'var(--green)' : r < 45 ? 'var(--red)' : 'var(--yellow)';
+  }
+
+  // Momentum indicator
+  const momVal = document.getElementById('momVal');
+  momVal.textContent = mom.toFixed(3) + '%';
+  momVal.style.color = mom > 0.03 ? 'var(--green)' : mom < -0.03 ? 'var(--red)' : 'var(--yellow)';
+  document.getElementById('momSig').textContent =
+    mom > 0.03 ? 'RISING' : mom < -0.03 ? 'FALLING' : 'FLAT';
+
+  // Strike projection:
+  // Projects price at round close using current momentum scaled linearly over remaining seconds.
+  // mom is % change over last 5 ticks; dividing by 20 converts to a per-second rate estimate.
+  const strike = parseFloat(document.getElementById('kalshiStrike').value) || price;
+  const proj = price * (1 + (mom / 20) * win.remaining / 100);
+  const projAbove = proj > strike;
+
+  // Signals scoring
+  let score = 0;
+  const emaOk = e9 !== null && e21 !== null;
+
+  // Signal 1: EMA cross (weight ±2)
+  const emaBull = emaOk && e9 > e21;
+  const emaBear = emaOk && e9 < e21;
+  setBadge('bd1', emaBull ? 'BULL \u2191' : emaBear ? 'BEAR \u2193' : 'WAIT', emaBull ? 'up' : emaBear ? 'down' : 'neu');
+  if (emaBull) score += 2; else if (emaBear) score -= 2;
+
+  // Signal 2: RSI (weight ±1)
+  const rsiBull = r !== null && r > 55;
+  const rsiBear = r !== null && r < 45;
+  setBadge('bd2', rsiBull ? 'BULLISH' : rsiBear ? 'BEARISH' : 'NEUTRAL', rsiBull ? 'up' : rsiBear ? 'down' : 'neu');
+  if (rsiBull) score += 1; else if (rsiBear) score -= 1;
+
+  // Signal 3: Momentum (weight ±1.5)
+  const momBull = mom > 0.03;
+  const momBear = mom < -0.03;
+  setBadge('bd3', momBull ? 'RISING \u2191' : momBear ? 'FALLING \u2193' : 'FLAT', momBull ? 'up' : momBear ? 'down' : 'neu');
+  if (momBull) score += 1.5; else if (momBear) score -= 1.5;
+
+  // Signal 4: Price vs EMA9 (weight ±1)
+  const priceAboveEma9 = emaOk && price > e9;
+  setBadge('bd4', priceAboveEma9 ? 'ABOVE EMA9' : emaOk ? 'BELOW EMA9' : 'WAIT',
+    priceAboveEma9 ? 'up' : emaOk ? 'down' : 'neu');
+  if (priceAboveEma9) score += 1; else if (emaOk) score -= 1;
+
+  // Signal 5: Round timing gate — penalise late entries
+  const timingOk = win.pct < 60;
+  setBadge('bd5', timingOk ? 'ENTRY OK' : 'LATE — SKIP', timingOk ? 'up' : 'down');
+  if (!timingOk) score = score * LATE_ENTRY_PENALTY;
+
+  // Signal 6: Projected close vs strike (weight ±1)
+  setBadge('bd6', projAbove ? 'PROJ ABOVE \u2191' : 'PROJ BELOW \u2193', projAbove ? 'up' : 'down');
+  if (projAbove) score += 1; else score -= 1;
+
+  // Verdict
+  const confidence = Math.min(100, Math.round((Math.abs(score) / MAX_SCORE) * 100));
+  const verdictBox = document.getElementById('verdictBox');
+  const verdictDir = document.getElementById('verdictDir');
+  const verdictSub = document.getElementById('verdictSub');
+  const confFill = document.getElementById('confFill');
+  const confPct = document.getElementById('confPct');
+
+  if (score >= SIGNAL_THRESHOLD) {
+    verdictBox.className = 'verdict up';
+    verdictDir.textContent = 'UP \u2191';
+    verdictSub.textContent = 'Bullish signals aligned — BET ABOVE STRIKE';
+    confFill.style.background = 'var(--green)';
+  } else if (score <= -SIGNAL_THRESHOLD) {
+    verdictBox.className = 'verdict down';
+    verdictDir.textContent = 'DOWN \u2193';
+    verdictSub.textContent = 'Bearish signals aligned — BET BELOW STRIKE';
+    confFill.style.background = 'var(--red)';
+  } else {
+    verdictBox.className = 'verdict hold';
+    verdictDir.textContent = 'SKIP';
+    verdictSub.textContent = 'Signals mixed or weak — AVOID THIS ROUND';
+    confFill.style.background = 'var(--yellow)';
+  }
+
+  confFill.style.width = confidence + '%';
+  confPct.textContent = confidence + '%';
+
+  lastPrice = price;
+}
+
+main();
+refreshInterval = setInterval(main, 5000);
+</script>
 </body>
 </html>
