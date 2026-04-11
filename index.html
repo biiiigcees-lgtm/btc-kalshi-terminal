@@ -225,15 +225,22 @@ body{
 .lock-inner.locked-dn{background:rgba(255,59,92,0.06);border-color:rgba(255,59,92,0.25);color:var(--r)}
 .lock-inner.building{border-color:rgba(86,212,245,0.25);color:var(--b);background:rgba(86,212,245,0.05)}
 
-/* === MODE AI DECISION === */
-.mode-ai{
-  margin-top:14px;padding:14px;border-radius:var(--radius-sm);text-align:center;
-  background:rgba(12,18,32,0.5);border:1px solid rgba(60,80,120,0.1);
-  -webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px)
+/* === ALL 3 MODE DECISIONS === */
+.mode-decisions{
+  margin-top:14px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px
 }
-.mode-ai-hdr{font-size:8px;font-weight:600;letter-spacing:.14em;color:var(--t4);margin-bottom:8px}
-.mode-ai-call{font-size:22px;font-weight:900;color:var(--t2);transition:color .3s}
-.mode-ai-why{font-size:9px;color:var(--t3);margin-top:6px;line-height:1.6;letter-spacing:.01em;font-weight:400}
+.mode-card{
+  padding:12px 8px;border-radius:var(--radius-sm);text-align:center;
+  background:rgba(12,18,32,0.5);border:1px solid rgba(60,80,120,0.12);
+  -webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);
+  transition:border-color .3s,box-shadow .3s
+}
+.mode-card.active-mode{border-color:rgba(86,212,245,0.4);box-shadow:0 0 12px rgba(86,212,245,0.08)}
+.mc-hdr{font-size:7px;font-weight:700;letter-spacing:.14em;color:var(--t4);margin-bottom:6px}
+.mc-call{font-size:16px;font-weight:900;color:var(--t2);transition:color .3s}
+.mc-conf{font-size:9px;font-weight:600;margin-top:3px}
+.mc-why{font-size:8px;color:var(--t3);margin-top:4px;line-height:1.5;font-weight:400}
+.mc-tag{display:inline-block;font-size:7px;font-weight:700;letter-spacing:.08em;padding:2px 6px;border-radius:3px;margin-top:4px}
 
 /* === GENIE ANALYSIS === */
 .genie-text{font-size:11px;color:var(--t2);line-height:1.7;letter-spacing:.015em;font-weight:400}
@@ -348,10 +355,25 @@ body{
     <button class="mode-btn active" data-m="balanced" onclick="setMode('balanced')">&#x2696;&#xFE0F; BALANCED</button>
     <button class="mode-btn" data-m="aggressive" onclick="setMode('aggressive')">&#x1F525; AGGRESSIVE</button>
   </div>
-  <div class="mode-ai" id="modeAI">
-    <div class="mode-ai-hdr" id="modeAIHdr">BALANCED ANALYSIS</div>
-    <div class="mode-ai-call" id="modeAICall">--</div>
-    <div class="mode-ai-why" id="modeAIWhy">Select a mode and enter bankroll for mode-specific AI decision</div>
+  <div class="mode-decisions" id="modeDecisions">
+    <div class="mode-card" id="mcSafe">
+      <div class="mc-hdr">🛡️ SAFE</div>
+      <div class="mc-call" id="mcSafeCall">--</div>
+      <div class="mc-conf" id="mcSafeConf"></div>
+      <div class="mc-why" id="mcSafeWhy"></div>
+    </div>
+    <div class="mode-card" id="mcBalanced">
+      <div class="mc-hdr">⚖️ BALANCED</div>
+      <div class="mc-call" id="mcBalancedCall">--</div>
+      <div class="mc-conf" id="mcBalancedConf"></div>
+      <div class="mc-why" id="mcBalancedWhy"></div>
+    </div>
+    <div class="mode-card" id="mcAggressive">
+      <div class="mc-hdr">🔥 AGGRESSIVE</div>
+      <div class="mc-call" id="mcAggressiveCall">--</div>
+      <div class="mc-conf" id="mcAggressiveConf"></div>
+      <div class="mc-why" id="mcAggressiveWhy"></div>
+    </div>
   </div>
   <div class="bet-sug" id="betSug">
     <div class="bet-lbl">GENIE SUGGESTS</div>
@@ -393,7 +415,7 @@ body{
   <div id="obDiv"><div style="text-align:center;font-size:10px;color:var(--t4)">Loading...</div></div>
 </div>
 
-<div class="ftr">Live data · Coinbase WebSocket + Binance · GENIE AI v4.2 · Frosted Glass UI</div>
+<div class="ftr">Live data · Composite Price (Coinbase + Kraken) · Binary-Aware AI · GENIE v4.4</div>
 </div>
 
 <script>
@@ -1178,85 +1200,73 @@ function analyze(opts){
   if(ind15m&&ind15m.e9&&ind15m.e21){
     var h15Bull=ind15m.e9>ind15m.e21;
     var aligned1m15m=ind.e9&&ind.e21&&((ind.e9>ind.e21)===h15Bull);
-    htfNote=aligned1m15m?' 15M chart confirms — multi-timeframe alignment.':(h15Bull?' 15M trend bullish, watching for 1M alignment.':' 15M trend bearish, 1M may catch up.');
+    htfNote=aligned1m15m?' 15M chart confirms \u2014 multi-timeframe alignment.':(h15Bull?' 15M trend bullish, watching for 1M alignment.':' 15M trend bearish, 1M may catch up.');
   }
 
-  var call,reason,modeConf,modeReason,modePriceBias;
+  // ===== BINARY-AWARE: One side ALWAYS wins on Kalshi. Always compute a lean. =====
+  // The raw score direction IS the lean. Score > 0 = ABOVE, < 0 = BELOW, == 0 = coin flip.
+  var rawLean=score>=0?'ABOVE':'BELOW';
 
-  // HARD GATES — apply before any mode decision
-  // 1. Entropy rejection: conflicting indicators = skip entirely
-  if(cfl.conflicted){
-    call='SKIP';reason='SKIP — signal classes conflicted, high market entropy';
-    modeConf=0;modeReason='Confluence gate: '+cfl.aligned+'/'+cfl.total+' classes aligned but opposing classes detected. No trade when directional agreement is ambiguous. Disciplined skip.';
-    modePriceBias=0;
-  }
-  // 2. Confluence rejection: not enough independent agreement
-  else if(!cfl.pass){
-    call='SKIP';reason='SKIP — insufficient confluence ('+cfl.aligned+'/'+cfl.required+' classes)';
-    modeConf=0;modeReason='Confluence gate requires '+cfl.required+' aligned signal classes (Trend, Oscillators, Momentum, Volume, Flow, 15M). Currently '+cfl.aligned+' aligned. No confluence = no trade.';
-    modePriceBias=0;
-  }
-  // 3. EV rejection: edge below safety margin
-  else if(!evResult.viable){
-    call='SKIP';reason='SKIP — EV negative or below safety margin ('+evResult.edge.toFixed(3)+' < '+S.ev.safetyMargin+')';
-    modeConf=0;modeReason='Expected value check failed. Edge: '+evResult.edge.toFixed(3)+', required margin: '+S.ev.safetyMargin+'. Marginal setups rejected. Only act on clear +EV.';
-    modePriceBias=0;
-  }
-  // 4. Path dependency caution: fail streak
-  else if(PD.failStreak>=3){
-    call='SKIP';reason='SKIP — '+PD.failStreak+' consecutive failed signals, risk throttled';
-    modeConf=0;modeReason='Path dependency: '+PD.failStreak+' recent signals failed. Auto-pause to avoid revenge logic and recency bias. Waiting for regime stabilization.';
-    modePriceBias=0;
-  }
-  // 5. All gates passed — mode-specific strategy
-  else if(mode==='aggressive'){
-    var aThresh=1.8; // raised from 1.4 — fewer but higher-conviction trades
-    var aScore=score*(1+Math.abs(ind.mom)*2);
-    modeConf=clamp(Math.round((Math.abs(aScore)/maxS)*105),0,98);
-    modePriceBias=traj?traj.slope*2.0:0;
-    if(aScore>=aThresh){call='ABOVE';reason='EV+ bullish momentum — aggressive entry ABOVE'}
-    else if(aScore<=-aThresh){call='BELOW';reason='EV+ bearish momentum — aggressive entry BELOW'}
-    else{call='SKIP';reason='Edge insufficient for aggressive commitment'}
-    modeReason=call!=='SKIP'?'Momentum-capture: confluence '+cfl.aligned+'/'+cfl.total+' classes. EV='+evResult.ev.toFixed(3)+'. '+
-      (ind.mc&&ind.mc.crossUp?'MACD cross amplifies. ':ind.mc&&ind.mc.crossDown?'MACD bearish confirms. ':'')+
-      'Regime: '+regime.replace('_',' ')+'.'+htfNote+' Risk-adjusted edge extraction.':
-      'Waiting for stronger edge.'+htfNote+' Selectivity: '+Math.round(S.ev.selectivity*100)+'%.'
+  // Helper: compute mode-specific decision from shared score
+  function modeDecide(m){
+    var mConf,mReason,mBet,mCall;
+    var cflReq=m==='safe'?4:m==='aggressive'?2:3;
+    var cflPass=cfl.aligned>=cflReq&&!cfl.conflicted;
+    var evM=calcEV(rawConf,m);
+    var mMinConf=m==='safe'?80:m==='aggressive'?50:65;
 
-  }else if(mode==='safe'){
-    var sThresh=4.2; // raised from 3.8
-    var sScore=score*0.7;
-    var regimePenalty=(regime==='volatile'||regime==='compression')?0.35:1.0;
-    sScore*=regimePenalty;
-    modeConf=clamp(Math.round((Math.abs(sScore)/maxS)*75),0,98);
-    modePriceBias=traj?traj.slope*0.5:0;
-    var strongUp=0,strongDn=0;
-    if(trendScore>0.5)strongUp++;if(trendScore<-0.5)strongDn++;
-    if(oscScore>0.3)strongUp++;if(oscScore<-0.3)strongDn++;
-    if(momScore>0.3)strongUp++;if(momScore<-0.3)strongDn++;
-    if(flowScore>0.2)strongUp++;if(flowScore<-0.2)strongDn++;
-    var multiConfirm=Math.max(strongUp,strongDn)>=4; // raised from 3 to 4
-    if(sScore>=sThresh&&multiConfirm){call='ABOVE';reason='EV+ multi-confirmed bullish — safe entry ABOVE'}
-    else if(sScore<=-sThresh&&multiConfirm){call='BELOW';reason='EV+ multi-confirmed bearish — safe entry BELOW'}
-    else{call='SKIP';reason='Insufficient for safe deployment — capital preservation active'}
-    modeReason=call!=='SKIP'?'Capital preservation: '+Math.max(strongUp,strongDn)+'/4 categories, confluence '+cfl.aligned+'/'+cfl.total+'. EV='+evResult.ev.toFixed(3)+'. '+
-      (regimePenalty<1?'Regime penalty ('+regime.replace('_',' ')+'). ':'Clean regime. ')+
-      htfNote+' Drawdown-penalized, high-confidence only.':
-      'Safe mode: need 4+ categories, score '+sThresh.toFixed(1)+'. Got '+Math.max(strongUp,strongDn)+' categories, score '+Math.abs(sScore).toFixed(1)+'. Patience is the edge.'
-
-  }else{
-    var bThresh=2.8; // raised from 2.3 — fewer, cleaner trades
-    modeConf=rawConf;
-    modePriceBias=traj?traj.slope*1.2:0;
-    if(score>=bThresh){call='ABOVE';reason='EV+ bullish confluence — BET ABOVE STRIKE'}
-    else if(score<=-bThresh){call='BELOW';reason='EV+ bearish confluence — BET BELOW STRIKE'}
-    else{call='SKIP';reason='Edge insufficient — disciplined skip'}
-    modeReason=call!=='SKIP'?'Balanced: confluence '+cfl.aligned+'/'+cfl.total+' classes aligned. Score '+Math.abs(score).toFixed(1)+' > '+bThresh+'. EV='+evResult.ev.toFixed(3)+'. '+
-      'Regime: '+regime.replace('_',' ')+'.'+htfNote+' Risk-adjusted optimal deployment.':
-      'Score '+Math.abs(score).toFixed(1)+' vs threshold '+bThresh+'. Confluence: '+cfl.aligned+'/'+cfl.required+'. Selectivity: '+Math.round(S.ev.selectivity*100)+'%.'
+    if(m==='aggressive'){
+      var aScore=score*(1+Math.abs(ind.mom)*2);
+      mConf=clamp(Math.round((Math.abs(aScore)/maxS)*105),0,98);
+      mCall=aScore>=0?'ABOVE':'BELOW';
+      mBet=Math.abs(aScore)>=1.8&&cflPass&&evM.viable&&PD.failStreak<3;
+      mReason=mBet?'Momentum-capture: '+cfl.aligned+' classes. EV='+evM.ev.toFixed(3)+'. Regime: '+regime.replace('_',' ')+'.'+htfNote:
+        'Lean '+mCall+' but edge insufficient (score '+Math.abs(aScore).toFixed(1)+'/1.8, confluence '+cfl.aligned+'/'+cflReq+').'+htfNote;
+    }else if(m==='safe'){
+      var sScore=score*0.7;
+      var regPen=(regime==='volatile'||regime==='compression')?0.35:1.0;
+      sScore*=regPen;
+      mConf=clamp(Math.round((Math.abs(sScore)/maxS)*75),0,98);
+      mCall=sScore>=0?'ABOVE':'BELOW';
+      var sUp=0,sDn=0;
+      if(trendScore>0.5)sUp++;if(trendScore<-0.5)sDn++;
+      if(oscScore>0.3)sUp++;if(oscScore<-0.3)sDn++;
+      if(momScore>0.3)sUp++;if(momScore<-0.3)sDn++;
+      if(flowScore>0.2)sUp++;if(flowScore<-0.2)sDn++;
+      var sMulti=Math.max(sUp,sDn)>=4;
+      mBet=Math.abs(sScore)>=4.2&&sMulti&&cflPass&&evM.viable&&PD.failStreak<3;
+      mReason=mBet?'Capital preservation: '+Math.max(sUp,sDn)+'/4 categories, EV='+evM.ev.toFixed(3)+'.'+htfNote:
+        'Lean '+mCall+' but need 4+ categories (got '+Math.max(sUp,sDn)+'), score '+Math.abs(sScore).toFixed(1)+'/4.2.'+htfNote;
+    }else{
+      mConf=rawConf;
+      mCall=score>=0?'ABOVE':'BELOW';
+      mBet=Math.abs(score)>=2.8&&cflPass&&evM.viable&&PD.failStreak<3;
+      mReason=mBet?'Balanced: '+cfl.aligned+' classes. Score '+Math.abs(score).toFixed(1)+'. EV='+evM.ev.toFixed(3)+'. Regime: '+regime.replace('_',' ')+'.'+htfNote:
+        'Lean '+mCall+' but score '+Math.abs(score).toFixed(1)+'/2.8, confluence '+cfl.aligned+'/'+cflReq+'.'+htfNote;
+    }
+    // Apply mode minimum confidence gate
+    if(mBet&&mConf<mMinConf){mBet=false;mReason='Lean '+mCall+' \u2014 confidence '+mConf+'% below '+m+' minimum ('+mMinConf+'%). Watch only.'}
+    return{call:mCall,conf:mConf,bet:mBet,reason:mReason,minConf:mMinConf}
   }
+
+  // Compute decisions for ALL THREE modes
+  var allModes={
+    safe:modeDecide('safe'),
+    balanced:modeDecide('balanced'),
+    aggressive:modeDecide('aggressive')
+  };
+
+  // Active mode's decision
+  var activeDecision=allModes[mode];
+  var call=activeDecision.call;
+  var modeConf=activeDecision.conf;
+  var reason=activeDecision.bet?(call==='ABOVE'?'ABOVE \u2014 ':'BELOW \u2014 ')+activeDecision.reason:'Lean '+call+' \u2014 '+activeDecision.reason;
+  var modeReason=activeDecision.reason;
+  var modePriceBias=traj?(mode==='aggressive'?traj.slope*2.0:mode==='safe'?traj.slope*0.5:traj.slope*1.2):0;
 
   // Update selectivity ratio
-  if(call!=='SKIP')S.ev.totalBets++;
+  if(activeDecision.bet)S.ev.totalBets++;
+  else S.ev.totalSkips++;
   var totalDecisions=S.ev.totalBets+S.ev.totalSkips;
   S.ev.selectivity=totalDecisions>0?S.ev.totalSkips/totalDecisions:1.0;
 
@@ -1268,38 +1278,36 @@ function analyze(opts){
   var dse=dseUpdate(score,modeConf,call,modeThreshRef);
 
   // DSE overrides raw call with stateful, noise-filtered, committed decision
+  // But now: DSE always returns ABOVE or BELOW (binary), never SKIP
   var finalCall=dse.call;
   var finalConf=dse.conf;
+  // If DSE is in SKIP state, use the raw lean direction with low confidence
+  if(finalCall==='SKIP'){
+    finalCall=rawLean;
+    finalConf=clamp(Math.round((1-dse.entropy)*35),1,35); // low confidence from entropy
+  }
   // Enrich reason with DSE state context
-  var dseNote='';
-  if(dse.locked)dseNote=' [STATE LOCKED '+dse.ticksInState+'/'+S.dse.minHold+']';
-  else if(finalCall!=='SKIP')dseNote=' [P('+finalCall.toLowerCase()+')='+Math.round((finalCall==='ABOVE'?dse.probAbove:dse.probBelow)*100)+'% | H='+dse.entropy.toFixed(2)+' | \u03C3\u00B2='+dse.variance.toFixed(1)+']';
-  var finalReason=finalCall===call?reason+dseNote:'DSE: maintaining '+finalCall+' \u2014 probabilistic dominance holds.'+dseNote;
+  var dseNote=' [P(\u2191)='+Math.round(dse.probAbove*100)+'% P(\u2193)='+Math.round(dse.probBelow*100)+'%';
+  if(dse.locked)dseNote+=' LOCKED '+dse.ticksInState+'/'+S.dse.minHold;
+  dseNote+=' H='+dse.entropy.toFixed(2)+']';
+  var finalReason=(activeDecision.bet?'BET ':'LEAN ')+finalCall+' \u2014 '+modeReason+dseNote;
 
   // Override mode confidence with DSE confidence if DSE has conviction
-  if(finalCall!=='SKIP'&&dse.conf>10)finalConf=dse.conf;
+  if(dse.conf>10)finalConf=Math.max(finalConf,dse.conf);
 
   // ===== URGENCY FACTOR — time remaining in 15m window =====
   var urgency=1.0;
   var tl=kal.tl||0;
-  if(tl>600)urgency=0.85; // >10min left: patient, reduce overcommitment
-  else if(tl>300)urgency=1.0; // 5-10min: optimal window
-  else if(tl>120)urgency=1.1; // 2-5min: slight boost — less time for reversal
-  else if(tl>30)urgency=0.7; // 30s-2min: too late for confident entry
-  else urgency=0.3; // <30s: near expiry, heavily penalize
-  if(finalCall==='ABOVE'||finalCall==='BELOW'){
-    finalConf=clamp(Math.round(finalConf*urgency),0,98);
-    if(urgency<0.8)finalReason+=' [URGENCY: '+Math.round(urgency*100)+'% \u2014 '+(tl<30?'near expiry':'late entry risk')+']';
-  }
+  if(tl>600)urgency=0.85;
+  else if(tl>300)urgency=1.0;
+  else if(tl>120)urgency=1.1;
+  else if(tl>30)urgency=0.7;
+  else urgency=0.3;
+  finalConf=clamp(Math.round(finalConf*urgency),1,98);
+  if(urgency<0.8)finalReason+=' [URGENCY: '+Math.round(urgency*100)+'%]';
 
-  // ===== MODE CONFIDENCE MINIMUM GATE — hard threshold per mode =====
-  // Safe >= 80%, Balanced >= 65%, Aggressive >= 50%
-  var modeMinConf=mode==='safe'?80:mode==='aggressive'?50:65;
-  if((finalCall==='ABOVE'||finalCall==='BELOW')&&finalConf<modeMinConf){
-    finalCall='SKIP';
-    finalReason='SKIP \u2014 confidence '+finalConf+'% below '+mode+' minimum ('+modeMinConf+'%). Disciplined rejection.';
-    S.ev.totalSkips++;
-  }
+  // Determine if this is a BET or just a LEAN for active mode
+  var isBet=activeDecision.bet&&finalConf>=activeDecision.minConf;
 
   // ===== MODE-ENTROPY CONFLICT — flag & recommend =====
   var modeConflict=null;
@@ -1309,8 +1317,9 @@ function analyze(opts){
     modeConflict='Low entropy with strong conviction \u2014 Safe mode may be leaving edge on the table. Consider Balanced.';
   }
 
-  return{call:finalCall,conf:finalConf,reason:finalReason,score:dse.smoothScore,signals:signals,modeReason:modeReason,projPrice:projPrice,rawConf:rawConf,
-    modeMinConf:modeMinConf,modeConflict:modeConflict,urgency:urgency,sr:sr,
+  return{call:finalCall,conf:finalConf,reason:finalReason,score:dse.smoothScore,signals:signals,
+    modeReason:modeReason,projPrice:projPrice,rawConf:rawConf,isBet:isBet,rawLean:rawLean,
+    allModes:allModes,modeMinConf:activeDecision.minConf,modeConflict:modeConflict,urgency:urgency,sr:sr,
     dse:{probAbove:dse.probAbove,probBelow:dse.probBelow,entropy:dse.entropy,variance:dse.variance,flips:dse.flips,ticksInState:dse.ticksInState,locked:dse.locked}}
 }
 
@@ -1419,27 +1428,27 @@ function genieText(){
     pts.push('15M analysis: loading historical chart data for macro context...');
   }
 
-  // Final call — assertive, committed language
+  // Final call — binary-aware, always picks a side (one MUST win on Kalshi)
   if(a){
     var dseI=a.dse||{};
     var evI=S.ev;
     var confI=S.conf;
+    var betLabel=a.isBet?'BET':'LEAN';
     if(a.call==='ABOVE'){
-      pts.push('ABOVE \u2014 '+a.conf+'% confidence. EV='+evI.ev.toFixed(3)+', edge='+evI.edge.toFixed(3)+'. '+confI.aligned+'/'+confI.required+' signal classes confirm.');
-      pts.push(Math.round(evI.selectivity*100)+'% skip rate. Only the cleanest setups.');
-    }else if(a.call==='BELOW'){
-      pts.push('BELOW \u2014 '+a.conf+'% confidence. EV='+evI.ev.toFixed(3)+', edge='+evI.edge.toFixed(3)+'. '+confI.aligned+'/'+confI.required+' signal classes confirm.');
-      pts.push(Math.round(evI.selectivity*100)+'% skip rate. Fewer trades, cleaner edge.');
+      pts.push(betLabel+' ABOVE \u2014 '+a.conf+'% confidence. EV='+evI.ev.toFixed(3)+', edge='+evI.edge.toFixed(3)+'. '+confI.aligned+'/'+confI.required+' signal classes confirm.');
+      if(a.isBet)pts.push('Actionable: deploy capital per Kelly sizing.');
+      else pts.push('Directional lean only \u2014 confidence below bet threshold. One side MUST win.');
     }else{
-      var skipReason='';
-      if(a.modeMinConf&&a.conf<a.modeMinConf)skipReason='confidence '+a.conf+'% below '+mode+' minimum ('+a.modeMinConf+'%)';
-      else if(confI.aligned<confI.required)skipReason='insufficient confluence ('+confI.aligned+'/'+confI.required+')';
-      else if(evI.edge<evI.safetyMargin)skipReason='EV below safety margin ('+evI.edge.toFixed(3)+' < '+evI.safetyMargin+')';
-      else if(dseI.entropy>0.55)skipReason='high entropy (H='+dseI.entropy.toFixed(2)+')';
-      else skipReason='edge below threshold';
-      pts.push('SKIP \u2014 '+skipReason+'. No trade. Marginal setups rejected.');
-      if(S.risk.currentDD>0.05)pts.push('Drawdown: '+(S.risk.currentDD*100).toFixed(1)+'% \u2014 risk throttle at '+(S.risk.throttle*100).toFixed(0)+'%.');
+      pts.push(betLabel+' BELOW \u2014 '+a.conf+'% confidence. EV='+evI.ev.toFixed(3)+', edge='+evI.edge.toFixed(3)+'. '+confI.aligned+'/'+confI.required+' signal classes confirm.');
+      if(a.isBet)pts.push('Actionable: deploy capital per Kelly sizing.');
+      else pts.push('Directional lean only \u2014 confidence below bet threshold. One side MUST win.');
     }
+    // Show all mode decisions in GENIE text
+    if(a.allModes){
+      var am=a.allModes;
+      pts.push('ALL MODES: Safe='+am.safe.call+' '+am.safe.conf+'%'+(am.safe.bet?' BET':' LEAN')+' | Balanced='+am.balanced.call+' '+am.balanced.conf+'%'+(am.balanced.bet?' BET':' LEAN')+' | Aggressive='+am.aggressive.call+' '+am.aggressive.conf+'%'+(am.aggressive.bet?' BET':' LEAN')+'.');
+    }
+    if(S.risk.currentDD>0.05)pts.push('Drawdown: '+(S.risk.currentDD*100).toFixed(1)+'% \u2014 risk throttle at '+(S.risk.throttle*100).toFixed(0)+'%.');
     // Mode-entropy conflict advisory
     if(a.modeConflict)pts.push('\u26A0\uFE0F '+a.modeConflict);
     // S/R context
@@ -1470,7 +1479,7 @@ function betSize(bank,conf,mode,call){
   }else if(mode==='safe'){
     mult=0.15;label='Eighth Kelly'; // reduced from 0.2 — capital preservation
     note=label+' \u00B7 '+(p*100).toFixed(0)+'% win est. \u00B7 Max capital preservation';
-    if(call==='SKIP')return{amt:0,frac:0,note:'Safe mode: no bet on SKIP signals',edge:edge}
+    if(!call)return{amt:0,frac:0,note:'Safe mode: waiting for signal',edge:edge}
   }else{
     mult=0.35;label='Third Kelly'; // reduced from 0.45 — consistency over frequency
     note=label+' \u00B7 '+(p*100).toFixed(0)+'% win est. \u00B7 Risk-adjusted optimal';
@@ -1511,7 +1520,7 @@ function updateLock(){
 /* ======== LOCK STATUS (for display inside signal card) ======== */
 function lockStatus(){
   if(S.lockDir)return{state:'locked',dir:S.lockDir,conf:S.lockConf,time:S.lockTime};
-  if(!S.analysis||S.analysis.call==='SKIP')return{state:'idle'};
+  if(!S.analysis)return{state:'idle'};
   var n=S.lockSamples.length;
   if(n<3)return{state:'idle'};
   // Count consistency
@@ -1554,18 +1563,19 @@ function render(){
   var strike=kal.open||(p?Math.round(p/500)*500:0);
   if(strike)$('tmStrike').textContent='Strike: '+fmt$(strike,0);
 
-  // Signal — assertive committed display
+  // Signal — always ABOVE or BELOW, with BET or LEAN prefix
   if(a){
-    var cls=a.call==='ABOVE'?'above':a.call==='BELOW'?'below':a.conf<15?'scanning':'hold';
+    var cls=a.call==='ABOVE'?'above':'below';
     $('sigCard').className='sig '+cls;
-    $('sigDir').textContent=a.call==='ABOVE'?'ABOVE \u2014 '+a.conf+'%':a.call==='BELOW'?'BELOW \u2014 '+a.conf+'%':S.hist.length<26?'ANALYZING':'SKIP';
+    var betPrefix=a.isBet?'':'LEAN ';
+    $('sigDir').textContent=betPrefix+a.call+' \u2014 '+a.conf+'%';
     $('sigSub').textContent=a.reason;
     // Big visible confidence
     var cpEl=$('confPct');
     cpEl.textContent=a.conf+'%';
-    cpEl.style.color=a.conf>=60?(a.call==='ABOVE'?CL.g:a.call==='BELOW'?CL.r:CL.o):a.conf>=35?CL.y:CL.t3;
+    cpEl.style.color=a.conf>=60?(a.call==='ABOVE'?CL.g:CL.r):a.conf>=35?CL.y:CL.t3;
     $('confFill').style.width=a.conf+'%';
-    $('confFill').style.background=a.call==='ABOVE'?CL.g:a.call==='BELOW'?CL.r:CL.o;
+    $('confFill').style.background=a.call==='ABOVE'?CL.g:CL.r;
     // Mode-entropy conflict warning
     if(a.modeConflict){
       $('sigSub').textContent='\u26A0\uFE0F '+a.modeConflict;
@@ -1602,7 +1612,7 @@ function render(){
 
   // Conviction tracking — patient, gradual build-up
   var curDir=a?a.call:null;
-  if(curDir&&curDir!=='SKIP'){
+  if(curDir){
     S.betHistory.push({dir:curDir,conf:a.conf,t:Date.now()});
     if(S.betHistory.length>30)S.betHistory.shift();
     if(curDir===S.betStableDir){S.betStableCount++}
@@ -1633,7 +1643,7 @@ function render(){
       }
     }
   }else{
-    // SKIP or no signal — conviction decays
+    // No signal yet — conviction decays
     if(S.betConviction>0)S.betConviction=Math.max(0,S.betConviction-1);
     S.betStableCount=Math.max(0,S.betStableCount-1)
   }
@@ -1641,23 +1651,24 @@ function render(){
   // Bet sizing — conviction-scaled, mode-adaptive
   var bank=parseFloat(($('inBank')||{}).value)||0;
   var conf=a?a.conf:0;
-  var bs=betSize(bank,conf,S.mode,a?a.call:'SKIP');
+  var bs=betSize(bank,conf,S.mode,a?a.call:null);
   var convMult=[0,0.15,0.35,0.6,0.85,1.0][Math.min(S.betConviction,5)];
   var dispAmt=Math.round(bs.amt*convMult);
   var dirEl=$('betDir'),convEl=$('betConv');
   // Bet direction label — above/below target
   var tgt=a&&a.projPrice?fmt$(a.projPrice,0):(p?fmt$(p,0):'---');
-  if(bank>0&&curDir&&curDir!=='SKIP'&&S.betConviction>=1){
+  var showBet=a&&a.isBet&&S.betConviction>=1;
+  if(bank>0&&curDir&&showBet){
     $('betAmt').textContent=fmt$(dispAmt,0);
     $('betAmt').style.color=curDir==='ABOVE'?CL.g:CL.r;
     dirEl.textContent=(curDir==='ABOVE'?'\u25B2 ABOVE ':'\u25BC BELOW ')+tgt;
     dirEl.style.color=curDir==='ABOVE'?CL.g:CL.r;
     var convLabels=['','Forming thesis...','Building position...','Growing confidence','Strong conviction','Maximum conviction \u2014 full deploy'];
     $('betNote').textContent=bs.note+' \u2014 '+convLabels[S.betConviction]
-  }else if(bank>0&&conf>0){
+  }else if(bank>0&&curDir){
     $('betAmt').textContent='$--';$('betAmt').style.color=CL.o;
-    dirEl.textContent='\u23F3 ANALYZING DIRECTION...';dirEl.style.color=CL.t3;
-    $('betNote').textContent='Building conviction \u2014 patience yields precision'
+    dirEl.textContent='LEAN '+(curDir==='ABOVE'?'\u25B2 ABOVE':'\u25BC BELOW')+' '+tgt+' \u2014 not yet a bet';dirEl.style.color=CL.t3;
+    $('betNote').textContent='Confidence too low for bet \u2014 watching for stronger signal'
   }else{
     $('betAmt').textContent='$--';$('betAmt').style.color=CL.b;
     dirEl.textContent='';
@@ -1673,30 +1684,29 @@ function render(){
   dotHTML+='<span class="bet-conv-lbl">'+S.betConviction+'/5</span>';
   convEl.innerHTML=dotHTML;
 
-  // Mode AI Decision section — powered by DSE
-  var mh=$('modeAIHdr'),mc=$('modeAICall'),mw=$('modeAIWhy');
-  if(S.mode==='aggressive')mh.textContent='\uD83D\uDD25 AGGRESSIVE ANALYSIS';
-  else if(S.mode==='safe')mh.textContent='\uD83D\uDEE1\uFE0F SAFE ANALYSIS';
-  else mh.textContent='\u2696\uFE0F BALANCED ANALYSIS';
-  if(a){
-    var cTxt=a.call==='ABOVE'?'ABOVE \u2014 '+a.conf+'% confidence':a.call==='BELOW'?'BELOW \u2014 '+a.conf+'% confidence':'SKIP \u2014 no trade';
-    mc.textContent=cTxt;
-    mc.style.color=a.call==='ABOVE'?CL.g:a.call==='BELOW'?CL.r:CL.o;
-    var why=a.modeReason||'';
-    if(a.projPrice)why+=' Projected: '+fmt$(a.projPrice,0)+'.';
-    // DSE state context
-    if(a.dse){
-      var d=a.dse;
-      why+=' [DSE: P(\u2191)='+Math.round(d.probAbove*100)+'% P(\u2193)='+Math.round(d.probBelow*100)+'%';
-      why+=' H='+d.entropy.toFixed(2);
-      why+=' \u03C3\u00B2='+d.variance.toFixed(1);
-      if(d.locked)why+=' LOCKED';
-      why+=' t='+d.ticksInState+']';
+  // All 3 mode decisions — show every mode simultaneously
+  var modeKeys=['safe','balanced','aggressive'];
+  var modeIds=['Safe','Balanced','Aggressive'];
+  for(var mi=0;mi<3;mi++){
+    var mk=modeKeys[mi],mid=modeIds[mi];
+    var cardEl=$('mc'+mid);
+    var callEl=$('mc'+mid+'Call');
+    var confEl=$('mc'+mid+'Conf');
+    var whyEl=$('mc'+mid+'Why');
+    // Highlight active mode
+    cardEl.className='mode-card'+(S.mode===mk?' active-mode':'');
+    if(a&&a.allModes){
+      var md=a.allModes[mk];
+      var isBetMode=md.bet&&md.conf>=md.minConf;
+      callEl.textContent=md.call;
+      callEl.style.color=md.call==='ABOVE'?CL.g:CL.r;
+      confEl.textContent=md.conf+'%'+(isBetMode?' \u2022 BET':' \u2022 LEAN');
+      confEl.style.color=isBetMode?(md.call==='ABOVE'?CL.g:CL.r):CL.t3;
+      whyEl.textContent=md.reason||'';
+    }else{
+      callEl.textContent='--';callEl.style.color=CL.t3;
+      confEl.textContent='';whyEl.textContent='Analyzing...'
     }
-    mw.textContent=why
-  }else{
-    mc.textContent='ANALYZING';mc.style.color=CL.t3;
-    mw.textContent='Collecting data for '+S.mode+' mode quantitative analysis...'
   }
 
   // GENIE text
@@ -1784,11 +1794,26 @@ function render(){
   S.lastPrice=p
 }
 
-/* ======== DATA FETCHING ======== */
+/* ======== DATA FETCHING — COMPOSITE PRICE (Coinbase + Kraken avg for Kalshi parity) ======== */
+var _priceSources={coinbase:null,kraken:null};
+function updateCompositePrice(){
+  var vals=[];
+  if(_priceSources.coinbase)vals.push(_priceSources.coinbase);
+  if(_priceSources.kraken)vals.push(_priceSources.kraken);
+  if(vals.length===0)return;
+  var sum=0;for(var i=0;i<vals.length;i++)sum+=vals[i];
+  var avg=sum/vals.length;
+  S.price=avg;S.hist=S.hist.slice(-(HIST_MAX-1)).concat([avg]);S._chartDirty=true;
+}
 function fetchSpot(){
-  return fetch('https://api.coinbase.com/v2/prices/BTC-USD/spot').then(function(r){return r.json()}).then(function(d){
-    var a=parseFloat(d&&d.data&&d.data.amount);if(isFinite(a)){S.price=a;S.hist=S.hist.slice(-(HIST_MAX-1)).concat([a]);S._chartDirty=true}
-  }).catch(function(){})
+  // Fetch from both Coinbase and Kraken, composite for closer-to-Kalshi pricing
+  var p1=fetch('https://api.coinbase.com/v2/prices/BTC-USD/spot').then(function(r){return r.json()}).then(function(d){
+    var a=parseFloat(d&&d.data&&d.data.amount);if(isFinite(a))_priceSources.coinbase=a;
+  }).catch(function(){});
+  var p2=fetch('https://api.kraken.com/0/public/Ticker?pair=XBTUSD').then(function(r){return r.json()}).then(function(d){
+    if(d&&d.result){var k=d.result.XXBTZUSD||d.result.XBTUSD;if(k){var a=parseFloat(k.c[0]);if(isFinite(a))_priceSources.kraken=a}}
+  }).catch(function(){});
+  return Promise.all([p1,p2]).then(function(){updateCompositePrice()})
 }
 function fetch24h(){
   return fetch('https://api.binance.us/api/v3/ticker/24hr?symbol=BTCUSDT').then(function(r){return r.json()}).then(function(d){
@@ -1825,8 +1850,9 @@ function connectWS(){
       try{var m=JSON.parse(e.data);
         if(m.type==='ticker'&&m.product_id==='BTC-USD'){
           var p=parseFloat(m.price);if(!isFinite(p))return;
-          S.price=p;var now=Date.now();
-          if(now-S._lhp>1000){S._lhp=now;S.hist=S.hist.slice(-(HIST_MAX-1)).concat([p]);S._chartDirty=true}
+          _priceSources.coinbase=p;var now=Date.now();
+          if(now-S._lhp>1000){S._lhp=now;updateCompositePrice()}
+          else{S.price=p} // fast tick update even without full composite
         }
       }catch(x){}
     };
@@ -1863,7 +1889,7 @@ function genieTick(){
   if(!S.price||!S.ind)return;
   S.genieText=genieText();
   var a=S.analysis;
-  var shortLine=a?(a.call==='ABOVE'?'\u2191 ABOVE':a.call==='BELOW'?'\u2193 BELOW':'SKIP')+' '+a.conf+'%'+' \u00B7 '+S.ind.regime.replace('_',' '):'Analyzing...';
+  var shortLine=a?((a.isBet?'BET ':'LEAN ')+(a.call==='ABOVE'?'\u2191 ABOVE':'\u2193 BELOW')+' '+a.conf+'%'+' \u00B7 '+S.ind.regime.replace('_',' ')):'Analyzing...';
   S.logs=[{line:shortLine,ts:ts()}].concat(S.logs).slice(0,6)
 }
 
