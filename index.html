@@ -30,7 +30,7 @@ body{
 }
 
 /* === AMBIENT BACKGROUND === */
-.app{display:flex;flex-direction:column;min-height:100vh;min-height:-webkit-fill-available;position:relative;overflow:hidden}
+.app{display:flex;flex-direction:column;min-height:100vh;min-height:-webkit-fill-available;position:relative;overflow-x:hidden;overflow-y:auto;-webkit-overflow-scrolling:touch}
 .app::before{
   content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
   background:
@@ -355,6 +355,23 @@ body{
   border-color:rgba(86,212,245,0.25);
   color:var(--b);
   box-shadow:0 0 12px rgba(86,212,245,0.06)
+}
+
+/* === MOBILE RESPONSIVE === */
+@media(max-width:480px){
+  .sec{padding:12px 10px;margin:4px 8px}
+  .hdr{padding:10px 12px;margin:4px 8px}
+  .chart-wrap{margin:4px 8px}
+  .chart-wrap canvas{height:160px}
+  .coin-tabs{margin:4px 8px;padding:3px;gap:2px}
+  .coin-tab{padding:8px 2px;font-size:10px}
+  .p-big{font-size:26px}
+  .sig-dir{font-size:42px}
+  .sig{padding:20px 14px}
+  .conf-pct{font-size:28px}
+  .pos-grid{grid-template-columns:1fr 1fr;gap:8px}
+  .session-stats{grid-template-columns:repeat(2,1fr)}
+  .ftr{font-size:7px;padding:8px}
 }
 </style>
 </head>
