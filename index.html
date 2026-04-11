@@ -1052,7 +1052,10 @@ function dseUpdate(rawScore,rawConf,rawCall,modeThresh){
   D.entropy=-(pa*Math.log2(pa)+pb*Math.log2(pb));
 
   // 5. ASYMPTOTIC THRESHOLDS — commit requires strong probabilistic dominance
-  var baseCommit=0.72,baseRelease=0.38;
+  // Mode-adaptive: aggressive trades through uncertainty, safe demands clarity
+  var isAggr=S.mode==='aggressive',isSafe=S.mode==='safe';
+  var baseCommit=isAggr?0.62:isSafe?0.78:0.72;
+  var baseRelease=isAggr?0.42:isSafe?0.34:0.38;
   var flipPenalty=Math.min(D.flips*0.04,0.18);
   D.commitThresh=baseCommit+flipPenalty;
   D.releaseThresh=baseRelease-flipPenalty*0.5;
@@ -1064,7 +1067,8 @@ function dseUpdate(rawScore,rawConf,rawCall,modeThresh){
   }
 
   // 6. MINIMUM HOLD — rises with flip count, ensures disciplined execution
-  D.minHold=20+D.flips*6; // base 20 ticks, +6 per historical flip
+  var baseHold=isAggr?12:isSafe?30:20;
+  D.minHold=baseHold+D.flips*6;
   if(D.minHold>90)D.minHold=90; // cap at 90 ticks (1.5 min)
 
   // 7. STATE MACHINE — deterministic transitions with EV + confluence + probabilistic dominance
@@ -1073,7 +1077,8 @@ function dseUpdate(rawScore,rawConf,rawCall,modeThresh){
   // Access EV and confluence state (updated by analyze before calling DSE)
   var evViable=S.ev.edge>S.ev.safetyMargin&&S.ev.ev>0;
   var confPass=S.conf.aligned>=S.conf.required&&!S.conf.conflicted;
-  var entropyLow=D.entropy<0.55; // stricter than before: 0.55 vs 0.7
+  var entropyGate=isAggr?0.75:isSafe?0.45:0.55;
+  var entropyLow=D.entropy<entropyGate;
 
   if(D.state==='SKIP'){
     // TRANSITION: SKIP -> ABOVE or BELOW
@@ -1516,9 +1521,7 @@ function analyze(opts){
 
   // ===== MODE-ENTROPY CONFLICT — flag & recommend =====
   var modeConflict=null;
-  if(mode==='aggressive'&&dse.entropy>0.6){
-    modeConflict='High entropy (H='+dse.entropy.toFixed(2)+') conflicts with Aggressive mode. Consider switching to Safe or Balanced.';
-  }else if(mode==='safe'&&dse.entropy<0.3&&finalConf>70){
+  if(mode==='safe'&&dse.entropy<0.3&&finalConf>70){
     modeConflict='Low entropy with strong conviction \u2014 Safe mode may be leaving edge on the table. Consider Balanced.';
   }
 
