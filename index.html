@@ -198,6 +198,7 @@ body{
 .mode-btn.active{border-color:rgba(86,212,245,0.35);color:var(--b);background:rgba(86,212,245,0.08);box-shadow:0 0 16px rgba(86,212,245,0.06),inset 0 0 8px rgba(86,212,245,0.04)}
 .mode-btn[data-m="safe"].active{border-color:rgba(0,232,123,0.3);color:var(--g);background:rgba(0,232,123,0.07);box-shadow:0 0 16px rgba(0,232,123,0.06),inset 0 0 8px rgba(0,232,123,0.04)}
 .mode-btn[data-m="aggressive"].active{border-color:rgba(255,59,92,0.3);color:var(--r);background:rgba(255,59,92,0.07);box-shadow:0 0 16px rgba(255,59,92,0.06),inset 0 0 8px rgba(255,59,92,0.04)}
+.mode-desc{font-size:9px;color:var(--t3);text-align:center;margin:8px 0 2px;line-height:1.6;padding:0 8px;font-weight:400;letter-spacing:.02em;opacity:0.85;transition:opacity .3s ease}
 
 /* Bet suggestion */
 .bet-sug{
@@ -371,6 +372,7 @@ body{
     <button class="mode-btn active" data-m="balanced" onclick="setMode('balanced')">&#x2696;&#xFE0F; BALANCED</button>
     <button class="mode-btn" data-m="aggressive" onclick="setMode('aggressive')">&#x1F525; AGGRESSIVE</button>
   </div>
+  <div class="mode-desc" id="modeDesc">Moderate stakes with disciplined edge thresholds. Balances growth and risk for steady, consistent returns across market conditions.</div>
   <div class="mode-decisions" id="modeDecisions">
     <div class="mode-card" id="mcSafe">
       <div class="mc-hdr">🛡️ SAFE</div>
@@ -542,6 +544,8 @@ function setMode(m){
   S.mode=m;
   var btns=document.querySelectorAll('.mode-btn');
   for(var i=0;i<btns.length;i++){btns[i].className='mode-btn'+(btns[i].getAttribute('data-m')===m?' active':'');}
+  var prof=RISK_PROFILES[m];
+  if(prof&&$('modeDesc'))$('modeDesc').textContent=prof.desc;
 }
 
 /* ======== INDICATORS ======== */
@@ -891,7 +895,7 @@ function updateRiskThrottle(bank,mode){
   var R=S.risk;
   if(bank>R.peakBank)R.peakBank=bank;
   R.currentDD=R.peakBank>0?(R.peakBank-bank)/R.peakBank:0;
-  R.ddLimit=mode==='aggressive'?0.20:mode==='safe'?0.10:0.15;
+  R.ddLimit=(RISK_PROFILES[mode]||RISK_PROFILES.balanced).ddLimit;
   // Throttle: linear reduction as drawdown approaches limit
   if(R.currentDD>=R.ddLimit){
     R.throttle=0.1; // 90% reduction at limit
@@ -1833,38 +1837,57 @@ function analyzeTargetPrice(currentPrice,targetPrice,secondsToExpiry,recentPrice
   }
 }
 
+/* ======== RISK PROFILES — Central config for all betting styles ======== */
+var RISK_PROFILES={
+  safe:      {kellyMult:0.15, edgeThresh:0.12, maxPct:0.08, ddLimit:0.10, label:'Eighth Kelly',  desc:'Capital preservation first. Only bets on high-confidence signals with wide safety margins. Ideal for protecting bankroll during choppy or uncertain markets.'},
+  balanced:  {kellyMult:0.35, edgeThresh:0.08, maxPct:0.15, ddLimit:0.15, label:'Third Kelly',   desc:'Moderate stakes with disciplined edge thresholds. Balances growth and risk for steady, consistent returns across market conditions.'},
+  aggressive:{kellyMult:0.70, edgeThresh:0.06, maxPct:0.25, ddLimit:0.20, label:'Fractional Kelly',desc:'Maximum EV extraction. Larger positions on lower-threshold edges. Higher variance — designed for experienced traders comfortable with drawdowns.'}
+};
+
+/**
+ * Pure position sizing function — config-driven, no side effects.
+ * @param {string} style       'safe'|'balanced'|'aggressive'
+ * @param {number} bankroll    Current bankroll in dollars
+ * @param {number} edge        Computed edge (2p-1), already Platt-scaled
+ * @param {number} fullKelly   Full Kelly fraction (edge for binary bet)
+ * @returns {{enabled:boolean, sizeInDollars:number, sizeAsPct:number, label:string, reason:string}}
+ */
+function getPositionSize(style,bankroll,edge,fullKelly){
+  var prof=RISK_PROFILES[style]||RISK_PROFILES.balanced;
+  if(!bankroll||bankroll<=0)return{enabled:false,sizeInDollars:0,sizeAsPct:0,label:prof.label,reason:'No bankroll'};
+  if(edge<=0)return{enabled:false,sizeInDollars:0,sizeAsPct:0,label:prof.label,reason:'Edge negative'};
+  if(edge<prof.edgeThresh)return{enabled:false,sizeInDollars:0,sizeAsPct:0,label:prof.label,reason:'Edge '+edge.toFixed(3)+' < threshold '+prof.edgeThresh};
+  var frac=fullKelly*prof.kellyMult;
+  frac=Math.min(frac,prof.maxPct); // hard cap per style
+  var size=Math.round(bankroll*frac);
+  size=clamp(size,0,bankroll);
+  return{enabled:true,sizeInDollars:size,sizeAsPct:+(frac*100).toFixed(2),label:prof.label,reason:'OK'}
+}
+
 /* ======== BET SIZING — MODE-ADAPTIVE KELLY CRITERION ======== */
 function betSize(bank,conf,mode,call){
   if(!bank||bank<=0||conf<=0)return{amt:0,frac:0,note:'',edge:0};
   // Risk throttle — drawdown-based automatic sizing reduction
   var throttle=updateRiskThrottle(bank,mode);
-  var p=0.5+(conf/100)*0.28; // conservative win probability mapping
+  // Platt-scaled probability (same as calcEV)
+  var z=(conf-50)*0.06;
+  var p=1/(1+Math.exp(-z));
+  p=clamp(p,0.50,0.82);
   var edge=2*p-1;
-  if(edge<=0)return{amt:0,frac:0,note:'Edge negative \u2014 no bet',edge:0};
-  // Reject if edge below mode's safety margin
-  var margin=mode==='aggressive'?0.06:mode==='safe'?0.12:0.08;
-  if(edge<margin)return{amt:0,frac:0,note:'Edge '+edge.toFixed(3)+' < margin '+margin+' \u2014 skip',edge:edge};
-
-  var mult,label,note;
-  if(mode==='aggressive'){
-    mult=0.7;label='Fractional Kelly'; // reduced from 0.9 — penalize drawdowns
-    note=label+' \u00B7 '+(p*100).toFixed(0)+'% win est. \u00B7 EV-optimized';
-  }else if(mode==='safe'){
-    mult=0.15;label='Eighth Kelly'; // reduced from 0.2 — capital preservation
-    note=label+' \u00B7 '+(p*100).toFixed(0)+'% win est. \u00B7 Max capital preservation';
-    if(!call)return{amt:0,frac:0,note:'Safe mode: waiting for signal',edge:edge}
-  }else{
-    mult=0.35;label='Third Kelly'; // reduced from 0.45 — consistency over frequency
-    note=label+' \u00B7 '+(p*100).toFixed(0)+'% win est. \u00B7 Risk-adjusted optimal';
+  // Use pure getPositionSize for base sizing
+  var pos=getPositionSize(mode,bank,edge,edge);
+  if(!pos.enabled){
+    if(mode==='safe'&&!call)return{amt:0,frac:0,note:'Safe mode: waiting for signal',edge:edge};
+    return{amt:0,frac:0,note:pos.reason+' \u2014 skip',edge:edge}
   }
-
-  var frac=edge*mult*throttle; // apply drawdown throttle
-  var amt=Math.round(bank*frac);
+  // Apply drawdown throttle on top of pure sizing
+  var amt=Math.round(pos.sizeInDollars*throttle);
   amt=clamp(amt,0,bank);
+  var note=pos.label+' \u00B7 '+(p*100).toFixed(0)+'% win est. \u00B7 '+pos.sizeAsPct+'% of bankroll';
   // Append risk context
   if(throttle<1.0)note+=' \u00B7 DD throttle: '+(throttle*100).toFixed(0)+'%';
   if(S.risk.currentDD>0.05)note+=' \u00B7 DD: '+(S.risk.currentDD*100).toFixed(1)+'%';
-  return{amt:amt,frac:(frac*100).toFixed(1),note:note,edge:edge}
+  return{amt:amt,frac:pos.sizeAsPct.toFixed(1),note:note,edge:edge}
 }
 
 /* ======== AUTO-LOCK (patient, diligent — only at extreme conviction) ======== */
