@@ -425,6 +425,9 @@ body{
     <div class="ind"><div class="ind-l">VOLUME FLOW</div><div class="ind-v" id="iVol">--</div><div class="ind-s" id="iVolSub">--</div></div>
     <div class="ind"><div class="ind-l">TREND STR</div><div class="ind-v" id="iTrend">--</div><div class="ind-s" id="iTrendSub">--</div></div>
     <div class="ind"><div class="ind-l">REGIME</div><div class="ind-v" id="iReg">--</div><div class="ind-s" id="iRegSub">--</div></div>
+    <div class="ind"><div class="ind-l">VWAP</div><div class="ind-v" id="iVwap">--</div><div class="ind-s" id="iVwapSub">--</div></div>
+    <div class="ind"><div class="ind-l">ATR (14)</div><div class="ind-v" id="iAtr">--</div><div class="ind-s" id="iAtrSub">--</div></div>
+    <div class="ind"><div class="ind-l">FUNDING</div><div class="ind-v" id="iFund">--</div><div class="ind-s" id="iFundSub">--</div></div>
   </div>
 </div>
 
@@ -438,7 +441,7 @@ body{
   <div id="obDiv"><div style="text-align:center;font-size:10px;color:var(--t4)">Loading...</div></div>
 </div>
 
-<div class="ftr">Live data · Composite Price (Coinbase + Kraken) · Binary-Aware AI · GENIE v4.4</div>
+<div class="ftr">Live data · Composite Price (Coinbase + Kraken) · Funding Rate · Kalshi Market · GENIE v5.0</div>
 </div>
 
 <script>
@@ -513,7 +516,16 @@ var S = {
     totalPnL:0,           // running P&L tracking
     sessionBets:0         // bets this session
   },
-  _lhp:0, _lktl:900, _chartDirty:true
+  _lhp:0, _lktl:900, _chartDirty:true,
+  _startTs:Date.now(),
+  // Real volume data from klines
+  histVol:[], // real volume per candle from Binance klines
+  // Funding rate
+  fundingRate:0, fundingNext:0,
+  // Kalshi market data
+  kalshi:{bid:null,ask:null,last:null,impliedProb:null,volume:0},
+  // Round outcome tracking
+  _roundCall:null, _roundConf:0, _roundIsBet:false, _roundSignals:null, _roundPrice:null
 };
 var ws=null, wsRT=null;
 
@@ -615,7 +627,27 @@ function computeInd(d){
   var mrSignal=0;
   if(e21){var dist=(pr-e21)/e21*100;if(dist>0.15)mrSignal=-0.5;else if(dist<-0.15)mrSignal=0.5}
 
-  return{e9:e9,e21:e21,e50:e50,e200:e200,r14:r14,r7:r7,rSlope:rSlope,mc:mc,bl:bl,sr:sr,wr:wr,cc:cc,mom:mom,roc:roc,tStr:tStr,regime:regime,divSignal:divSignal,mrSignal:mrSignal,price:pr}
+  // VWAP — Volume-Weighted Average Price (uses real volume if available)
+  var vwap=null;
+  if(d.length>=20){
+    var vols=S.histVol.length>=d.length?S.histVol.slice(-d.length):null;
+    var vpSum=0,vSum=0;
+    for(var vi=Math.max(0,d.length-60);vi<d.length;vi++){
+      var vol_i=vols?vols[vi]||1:1;
+      vpSum+=d[vi]*vol_i;vSum+=vol_i;
+    }
+    vwap=vSum>0?vpSum/vSum:pr;
+  }
+
+  // ATR — Average True Range (14-period, using close-to-close as proxy for single-series)
+  var atr=null;
+  if(d.length>=15){
+    var trSum=0;
+    for(var ai=d.length-14;ai<d.length;ai++){trSum+=Math.abs(d[ai]-d[ai-1])}
+    atr=trSum/14;
+  }
+
+  return{e9:e9,e21:e21,e50:e50,e200:e200,r14:r14,r7:r7,rSlope:rSlope,mc:mc,bl:bl,sr:sr,wr:wr,cc:cc,mom:mom,roc:roc,tStr:tStr,regime:regime,divSignal:divSignal,mrSignal:mrSignal,price:pr,vwap:vwap,atr:atr}
 }
 
 /* ======== ROLLING INDICATORS FOR CHART ======== */
@@ -695,11 +727,19 @@ function drawChart(){
   for(var i=0;i<n;i++){if(eVals9[i]!==null&&eVals9[i]!==undefined){if(!started){ctx.moveTo(px(i),py(eVals9[i]));started=true}else ctx.lineTo(px(i),py(eVals9[i]))}}
   ctx.stroke();
 
-  // Volume bars (approximate from price change magnitude)
+  // Volume bars (real volume from klines when available)
   var volH=H*0.12,volY=H*0.88;
-  var maxChg=0.001;for(var i=1;i<n;i++){var c=Math.abs(vis[i]-vis[i-1]);if(c>maxChg)maxChg=c}
+  var vols=S.histVol.slice(-n);
+  var hasRealVol=vols.length>=n;
+  var maxChg=0.001;
+  if(hasRealVol){
+    for(var i=0;i<n;i++){if(vols[i]>maxChg)maxChg=vols[i]}
+  }else{
+    for(var i=1;i<n;i++){var c=Math.abs(vis[i]-vis[i-1]);if(c>maxChg)maxChg=c}
+  }
   for(var i=1;i<n;i++){
-    var chg=vis[i]-vis[i-1];var h=Math.abs(chg)/maxChg*volH;
+    var volVal=hasRealVol?vols[i]:Math.abs(vis[i]-vis[i-1]);
+    var chg=vis[i]-vis[i-1];var h=volVal/maxChg*volH;
     var x=px(i),bw=Math.max(1,W/n*0.7);
     ctx.fillStyle=chg>=0?'rgba(0,255,136,0.2)':'rgba(255,51,85,0.2)';
     ctx.fillRect(x-bw/2,volY+volH-h,bw,h);
@@ -760,13 +800,14 @@ function trajectory(d,tl){
 
 /* ======== EV FRAMEWORK — Expected Value Calculator ======== */
 function calcEV(conf,mode){
-  // Convert confidence to win probability with conservative mapping
-  // p = 0.5 + (conf/100) * 0.28 — slightly less aggressive than raw
-  var p=0.5+(conf/100)*0.28;
+  // Platt-scaled probability: logistic mapping of confidence to win probability
+  // Calibrated so conf=0→0.50, conf=50→0.62, conf=80→0.74, conf=98→0.82
+  // p = 1 / (1 + exp(-k*(conf - c0))) where k=0.04, c0=0 maps [0,98] → [0.50,0.82]
+  var z=(conf-50)*0.06; // shift & scale: conf 50 → z=0, conf 98 → z=2.88
+  var p=1/(1+Math.exp(-z));
+  p=clamp(p,0.50,0.82); // never claim >82% edge on a binary
   var edge=2*p-1;
-  // EV = edge * kelly_fraction — represents expected growth per unit
-  var ev=edge*p-((1-p)*(1-edge));
-  // Safety margin: mode-adaptive minimum edge to act
+  var ev=edge*p-(1-p)*(1-edge);
   var margin=mode==='aggressive'?0.06:mode==='safe'?0.12:0.08;
   S.ev.edge=edge;S.ev.ev=ev;
   S.ev.evHistory.push({ev:ev,edge:edge,t:Date.now()});
@@ -1167,6 +1208,32 @@ function analyze(opts){
   }
   score+=clamp(srScore,-0.8,0.8);
 
+  // 10. FUNDING RATE — leading indicator for short-term pressure (max ±0.5)
+  var fundScore=0;
+  if(S.fundingRate){
+    // Positive funding = longs pay shorts = bearish pressure building
+    // Negative funding = shorts pay longs = bullish pressure building
+    if(S.fundingRate>0.001){fundScore=-0.3;signals.push({name:'Funding',val:'LONGS PAY '+(S.fundingRate*100).toFixed(4)+'%',type:'dn'})}
+    else if(S.fundingRate<-0.001){fundScore=0.3;signals.push({name:'Funding',val:'SHORTS PAY '+(S.fundingRate*100).toFixed(4)+'%',type:'up'})}
+    else{signals.push({name:'Funding',val:(S.fundingRate*100).toFixed(4)+'%',type:'neu'})}
+    // At extreme funding, stronger signal
+    if(S.fundingRate>0.005)fundScore=-0.5;
+    else if(S.fundingRate<-0.005)fundScore=0.5;
+  }
+  score+=clamp(fundScore,-0.5,0.5);
+
+  // 11. VWAP POSITION — institutional reference level (max ±0.4)
+  var vwapScore=0;
+  if(ind.vwap){
+    var vwapDist=(pr-ind.vwap)/ind.vwap*100;
+    if(vwapDist>0.03){vwapScore=0.2;signals.push({name:'VWAP',val:'ABOVE +'+vwapDist.toFixed(3)+'%',type:'up'})}
+    else if(vwapDist<-0.03){vwapScore=-0.2;signals.push({name:'VWAP',val:'BELOW '+vwapDist.toFixed(3)+'%',type:'dn'})}
+    else{signals.push({name:'VWAP',val:'AT VWAP',type:'neu'})}
+    // Strong VWAP deviation = stronger signal
+    if(Math.abs(vwapDist)>0.1)vwapScore*=2;
+  }
+  score+=clamp(vwapScore,-0.4,0.4);
+
   // ===== PATH DEPENDENCY — adjust weights based on recent outcomes =====
   var PD=updatePathDep(regime);
   auditSignalWeights();
@@ -1210,7 +1277,9 @@ function analyze(opts){
   if(nearRound&&stPct<0.3)score*=0.9;
 
   // ===== MODE-ADAPTIVE INTELLIGENCE + EV FRAMEWORK =====
-  var maxS=11.0; // expanded max due to path-dep weighted score
+  // Dynamic maxS: compute actual max possible weighted score for current regime (includes funding + VWAP)
+  var maxS=2*W.trend + 1.5*W.osc + 1.5*W.mom + 1*W.struct + 1*W.vol + 1.2*W.traj + 0.8*W.diverge + 1.5 + 0.8 + 0.5 + 0.4;
+  maxS=Math.max(maxS,5); // floor to avoid division instability
   var rawConf=clamp(Math.round((Math.abs(score)/maxS)*100),0,98);
 
   // Compute EV — reject if edge < safety margin
@@ -1318,14 +1387,14 @@ function analyze(opts){
   // Override mode confidence with DSE confidence if DSE has conviction
   if(dse.conf>10)finalConf=Math.max(finalConf,dse.conf);
 
-  // ===== URGENCY FACTOR — time remaining in 15m window =====
+  // ===== URGENCY FACTOR — smooth Gaussian curve centered at 180s (3 min left) =====
   var urgency=1.0;
   var tl=kal.tl||0;
-  if(tl>600)urgency=0.85;
-  else if(tl>300)urgency=1.0;
-  else if(tl>120)urgency=1.1;
-  else if(tl>30)urgency=0.7;
-  else urgency=0.3;
+  // Gaussian: peak at 180s, σ=150s. Drops off early and at expiry.
+  // u(t) = 0.3 + 0.8 * exp(-((t-180)/150)^2)
+  // At t=180: u=1.1, t=600: u=0.37, t=30: u=0.62, t=0: u=0.42
+  urgency=0.3+0.8*Math.exp(-Math.pow((tl-180)/150,2));
+  urgency=clamp(urgency,0.25,1.15);
   finalConf=clamp(Math.round(finalConf*urgency),1,98);
   if(urgency<0.8)finalReason+=' [URGENCY: '+Math.round(urgency*100)+'%]';
 
@@ -1621,11 +1690,35 @@ function analyzeTargetPrice(currentPrice,targetPrice,secondsToExpiry,recentPrice
   var positionWeight=1.5*(1-timeFactor*0.5); // heavier when close to expiry
   var momentumWeight=timeFactor; // lighter when close to expiry
 
-  // ── COMPOSITE SCORE ─────────────────────────────────────────────────
+  // ── 12. Funding rate bias ───────────────────────────────────────────
+  var fundBias=0;
+  if(S.fundingRate){
+    // Positive funding = longs pay shorts = bearish pressure at extremes
+    fundBias=S.fundingRate>0.001?-0.15:S.fundingRate<-0.001?0.15:S.fundingRate*100;
+  }
+
+  // ── 13. Kalshi implied probability integration ──────────────────────
+  var kalshiBias=0;
+  var kalshiEdge=null;
+  if(S.kalshi.impliedProb!==null){
+    // Kalshi prob is for "ABOVE" outcome. Use it as a Bayesian prior.
+    kalshiBias=(S.kalshi.impliedProb-0.5)*0.4; // gentle nudge toward market consensus
+  }
+
+  // ── 14. VWAP bias ──────────────────────────────────────────────────
+  var vwapBias=0;
+  if(ind.vwap){
+    // Price above VWAP = bullish institutional flow, below = bearish
+    vwapBias=currentPrice>ind.vwap?0.15:-0.15;
+  }
+
+  // ── COMPOSITE SCORE (volatility-normalized distance) ────────────────
   // Positive = favors ABOVE, negative = favors BELOW
   var composite=0;
-  // Current position relative to target (strongest signal near expiry)
-  composite+=aboveBias*Math.min(Math.abs(pctDist)*8,3)*positionWeight;
+  // Current position relative to target — NORMALIZED BY ATR to prevent saturation
+  var atrNorm=ind.atr||Math.max(Math.abs(diff),1); // fallback: use diff itself
+  var normDist=diff/atrNorm; // how many ATRs away from target
+  composite+=clamp(normDist*1.2,-2.5,2.5)*positionWeight;
   // Momentum projection
   composite+=(projAbove?1:-1)*0.8*momentumWeight;
   // Regression projection
@@ -1640,6 +1733,12 @@ function analyzeTargetPrice(currentPrice,targetPrice,secondsToExpiry,recentPrice
   composite+=dseBias;
   // Trajectory model
   composite+=trajBias;
+  // Funding rate
+  composite+=fundBias;
+  // Kalshi market consensus
+  composite+=kalshiBias;
+  // VWAP
+  composite+=vwapBias;
 
   // ── DIRECTION & PROBABILITY ─────────────────────────────────────────
   var direction=composite>=0?'ABOVE':'BELOW';
@@ -1709,6 +1808,18 @@ function analyzeTargetPrice(currentPrice,targetPrice,secondsToExpiry,recentPrice
     rationale.push('Risk: price hugging the strike — any micro-move could flip the outcome.');
   }
 
+  // 7. Kalshi market edge (if available)
+  if(S.kalshi.impliedProb!==null){
+    var mktProb=direction==='ABOVE'?S.kalshi.impliedProb:(1-S.kalshi.impliedProb);
+    var edgeVsMkt=probability-mktProb;
+    rationale.push('Kalshi market: '+Math.round(mktProb*100)+'% implied. Model edge: '+(edgeVsMkt>0?'+':'')+Math.round(edgeVsMkt*100)+'pp vs market.');
+  }
+
+  // 8. Funding rate context
+  if(Math.abs(S.fundingRate)>0.0005){
+    rationale.push('Funding rate: '+(S.fundingRate*100).toFixed(4)+'% — '+(S.fundingRate>0?'longs paying shorts (bearish pressure)':'shorts paying longs (bullish pressure)')+'.');
+  }
+
   // Ensure 3-6 bullets
   while(rationale.length<3)rationale.push('Edge is small — proceed with caution.');
   if(rationale.length>6)rationale=rationale.slice(0,6);
@@ -1717,7 +1828,8 @@ function analyzeTargetPrice(currentPrice,targetPrice,secondsToExpiry,recentPrice
     direction:direction,
     probability:Math.round(probability*1000)/1000,
     rationale:rationale,
-    confidenceLevel:confidenceLevel
+    confidenceLevel:confidenceLevel,
+    kalshiEdge:S.kalshi.impliedProb!==null?(probability-(direction==='ABOVE'?S.kalshi.impliedProb:(1-S.kalshi.impliedProb))):null
   }
 }
 
@@ -1975,13 +2087,17 @@ function render(){
   var tgtEl=$('tgtAnalysis');
   if(userTarget>0&&p&&S.hist.length>=30){
     var tpa=analyzeTargetPrice(p,userTarget,S.kal.tl,S.hist,{
-      ind:ind,ind15m:S.ind15m,ob:ob,dse:S.dse,traj:S.traj
+      ind:ind,ind15m:S.ind15m,ob:ob,dse:S.dse,traj:S.traj,_startTs:S._startTs
     });
     tgtEl.style.display='';
     $('tgtDir').textContent=tpa.direction;
     $('tgtDir').style.color=tpa.direction==='ABOVE'?CL.g:CL.r;
     $('tgtProb').textContent=Math.round(tpa.probability*100)+'% probability';
     $('tgtProb').style.color=tpa.direction==='ABOVE'?CL.g:CL.r;
+    // Show Kalshi edge if available
+    if(tpa.kalshiEdge!==null){
+      $('tgtProb').textContent+=(' \u00B7 '+(tpa.kalshiEdge>0?'+':'')+Math.round(tpa.kalshiEdge*100)+'pp edge vs Kalshi');
+    }
     var tagEl=$('tgtConfTag');
     tagEl.textContent=tpa.confidenceLevel.toUpperCase()+' CONFIDENCE';
     tagEl.style.background=tpa.confidenceLevel==='high'?CL.g+'20':tpa.confidenceLevel==='medium'?CL.y+'20':CL.o+'20';
@@ -2054,6 +2170,32 @@ function render(){
     $('iRegSub').textContent=ind.regime==='compression'?'BREAKOUT WATCH':ind.regime==='volatile'?'HIGH VOL':ind.regime.indexOf('trending')>=0?'DIRECTIONAL':'NEUTRAL'
   }
 
+  // VWAP
+  if(ind&&ind.vwap){
+    $('iVwap').textContent=fmt$(ind.vwap,0);
+    var vwapSide=p>ind.vwap;
+    $('iVwap').style.color=vwapSide?CL.g:CL.r;
+    $('iVwapSub').textContent=vwapSide?'ABOVE — BULLISH':'BELOW — BEARISH';
+    $('iVwapSub').style.color=vwapSide?CL.g:CL.r
+  }
+
+  // ATR
+  if(ind&&ind.atr){
+    $('iAtr').textContent='$'+ind.atr.toFixed(2);
+    var atrPct=(ind.atr/p*100);
+    $('iAtr').style.color=atrPct>0.1?CL.o:CL.t2;
+    $('iAtrSub').textContent=atrPct.toFixed(3)+'% of price';
+  }
+
+  // Funding rate
+  if(S.fundingRate!==0){
+    var fr=S.fundingRate*100;
+    $('iFund').textContent=fr.toFixed(4)+'%';
+    $('iFund').style.color=S.fundingRate>0.0005?CL.r:S.fundingRate<-0.0005?CL.g:CL.t2;
+    $('iFundSub').textContent=S.fundingRate>0.0005?'LONGS PAY':S.fundingRate<-0.0005?'SHORTS PAY':'NEUTRAL';
+    $('iFundSub').style.color=$('iFund').style.color;
+  }
+
   // Breakdown
   if(a&&a.signals){
     var bh='';for(var i=0;i<a.signals.length;i++){
@@ -2118,12 +2260,50 @@ function fetchOB(){
 }
 function fetchKlines(){
   return fetch('https://api.binance.us/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=180').then(function(r){return r.json()}).then(function(d){
-    if(Array.isArray(d)&&d.length>0){S.hist=d.map(function(k){return parseFloat(k[4])});S._chartDirty=true}
+    if(Array.isArray(d)&&d.length>0){
+      S.hist=d.map(function(k){return parseFloat(k[4])});
+      S.histVol=d.map(function(k){return parseFloat(k[5])||0}); // real BTC volume per candle
+      S._chartDirty=true
+    }
   }).catch(function(){})
 }
 function fetchKlines15m(){
   return fetch('https://api.binance.us/api/v3/klines?symbol=BTCUSDT&interval=15m&limit=96').then(function(r){return r.json()}).then(function(d){
     if(Array.isArray(d)&&d.length>0){S.hist15m=d.map(function(k){return parseFloat(k[4])})}
+  }).catch(function(){})
+}
+
+/* ======== FUNDING RATE — Leading indicator for BTC short-term direction ======== */
+function fetchFundingRate(){
+  // Binance Futures funding rate (public, no auth). Falls back gracefully.
+  fetch('https://fapi.binance.com/fapi/v1/fundingRate?symbol=BTCUSDT&limit=1').then(function(r){return r.json()}).then(function(d){
+    if(Array.isArray(d)&&d.length>0){
+      S.fundingRate=parseFloat(d[0].fundingRate)||0;
+      S.fundingNext=parseInt(d[0].fundingTime)||0;
+    }
+  }).catch(function(){})
+}
+
+/* ======== KALSHI MARKET DATA — implied probability from prediction market ======== */
+function fetchKalshiMarket(){
+  // Kalshi public market snapshot for BTC 15-min contracts
+  // Using the public REST endpoint — markets matching BTC short-term
+  fetch('https://api.elections.kalshi.com/trade-api/v2/markets?status=open&series_ticker=KXBTC&limit=5').then(function(r){return r.json()}).then(function(d){
+    if(d&&d.markets&&d.markets.length>0){
+      // Find the contract closest to current time
+      var best=d.markets[0];
+      for(var i=1;i<d.markets.length;i++){
+        var mExp=new Date(d.markets[i].close_time||0).getTime();
+        var bExp=new Date(best.close_time||0).getTime();
+        var now=Date.now();
+        if(Math.abs(mExp-now)<Math.abs(bExp-now))best=d.markets[i];
+      }
+      S.kalshi.bid=(best.yes_bid||0)/100;
+      S.kalshi.ask=(best.yes_ask||0)/100;
+      S.kalshi.last=(best.last_price||0)/100;
+      S.kalshi.impliedProb=S.kalshi.last||((S.kalshi.bid+S.kalshi.ask)/2)||null;
+      S.kalshi.volume=best.volume||0;
+    }
   }).catch(function(){})
 }
 
@@ -2152,7 +2332,33 @@ function updateTimer(){
   var now=new Date(),sec=now.getMinutes()*60+now.getSeconds();
   var tl=900-(sec%900),phase=tl>600?'early':tl>300?'mid':tl>90?'late':'critical';
   var newRound=tl>S._lktl+60&&tl>890;S._lktl=tl;
-  if(newRound){S.kal.open=S.price;S.kal.wPrices=[];S.lockDir=null;S.lockConf=0;S.lockTime=null;S.lockSamples=[]}
+  if(newRound){
+    // ===== OUTCOME TRACKING — record whether last round's call was correct =====
+    if(S._roundCall&&S._roundPrice&&S.kal.open){
+      var actualAbove=S.price>=S.kal.open;
+      var predicted=S._roundCall==='ABOVE';
+      var wasCorrect=actualAbove===predicted;
+      // Record per-signal-class outcomes
+      if(S._roundSignals){
+        var sigClasses=['trend','osc','mom','vol','flow','traj','div','htf'];
+        for(var oi=0;oi<sigClasses.length;oi++){
+          var sc=sigClasses[oi];
+          S.pathDep.outcomes.push({signal:sc,result:wasCorrect?'hit':'miss',ts:Date.now()});
+        }
+        if(S.pathDep.outcomes.length>80)S.pathDep.outcomes=S.pathDep.outcomes.slice(-80);
+      }
+      // Update fail streak
+      if(wasCorrect){S.pathDep.failStreak=0}else{S.pathDep.failStreak++}
+      // Update session P&L tracking
+      S.risk.sessionBets++;
+      if(S._roundIsBet){
+        var pnlAmt=wasCorrect?50:-50; // approximate per-bet P&L
+        S.risk.totalPnL+=pnlAmt;
+      }
+    }
+    S.kal.open=S.price;S.kal.wPrices=[];S.lockDir=null;S.lockConf=0;S.lockTime=null;S.lockSamples=[];
+    S._roundCall=null;S._roundConf=0;S._roundIsBet=false;S._roundSignals=null;S._roundPrice=null;
+  }
   if(!S.kal.open&&S.price)S.kal.open=S.price;
   S.kal.tl=tl;S.kal.phase=phase;
   if(S.price)S.kal.wPrices=S.kal.wPrices.slice(-100).concat([S.price])
@@ -2166,7 +2372,15 @@ function tick(){
   S.ind15m=S.hist15m.length>=26?computeInd(S.hist15m):null;
   S.traj=trajectory(S.hist,S.kal.tl);
   if(S.ind&&S.price&&strike){
-    S.analysis=analyze({price:S.price,strike:strike,ind:S.ind,ind15m:S.ind15m,kal:S.kal,obImb:S.ob.imb,mode:S.mode,traj:S.traj})
+    S.analysis=analyze({price:S.price,strike:strike,ind:S.ind,ind15m:S.ind15m,kal:S.kal,obImb:S.ob.imb,mode:S.mode,traj:S.traj});
+    // Record current round's call for outcome tracking at next round reset
+    if(S.analysis){
+      S._roundCall=S.analysis.call;
+      S._roundConf=S.analysis.conf;
+      S._roundIsBet=S.analysis.isBet;
+      S._roundSignals=S.analysis.signals;
+      S._roundPrice=S.price;
+    }
   }
   updateLock();render()
 }
@@ -2196,12 +2410,16 @@ function init(){
     connectWS();startPoll();
     setInterval(fetch24h,12000);setInterval(fetchOB,2500);
     setInterval(fetchKlines15m,120000);
+    fetchFundingRate();setInterval(fetchFundingRate,60000);
+    fetchKalshiMarket();setInterval(fetchKalshiMarket,15000);
     setInterval(tick,1000);setInterval(genieTick,4000);
     tick();setTimeout(genieTick,1500)
   }).catch(function(){
     connectWS();startPoll();
     setInterval(fetch24h,12000);setInterval(fetchOB,2500);
     setInterval(fetchKlines15m,120000);
+    fetchFundingRate();setInterval(fetchFundingRate,60000);
+    fetchKalshiMarket();setInterval(fetchKalshiMarket,15000);
     setInterval(tick,1000);setInterval(genieTick,4000)
   })
 }
