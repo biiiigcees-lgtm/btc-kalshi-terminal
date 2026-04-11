@@ -332,18 +332,51 @@ body{
 /* === STAND ASIDE === */
 .bet-sug.stand-aside{border-color:rgba(255,183,64,0.25);background:rgba(255,183,64,0.04)}
 .bet-sug.stand-aside .bet-amt{font-size:18px}
+
+/* === COIN TABS === */
+.coin-tabs{
+  display:flex;gap:4px;margin:6px 12px;padding:4px;
+  overflow-x:auto;-webkit-overflow-scrolling:touch;
+  background:var(--glass);border-radius:var(--radius);
+  border:1px solid var(--glass-border);
+  -webkit-backdrop-filter:blur(var(--blur));backdrop-filter:blur(var(--blur))
+}
+.coin-tab{
+  flex:1;min-width:0;padding:10px 4px;
+  border:1px solid transparent;background:transparent;
+  color:var(--t3);border-radius:var(--radius-sm);
+  font-size:11px;font-weight:700;letter-spacing:.08em;
+  cursor:pointer;transition:all .3s;font-family:inherit;
+  white-space:nowrap;text-align:center
+}
+.coin-tab:hover{background:rgba(20,30,50,0.4);color:var(--t2)}
+.coin-tab.active{
+  background:rgba(86,212,245,0.08);
+  border-color:rgba(86,212,245,0.25);
+  color:var(--b);
+  box-shadow:0 0 12px rgba(86,212,245,0.06)
+}
 </style>
 </head>
 <body>
 <div class="app" id="app">
 
 <div class="hdr">
-  <div class="hdr-l"><div class="dot off" id="dot"></div><div class="hdr-t">BTC TERMINAL PRO</div></div>
+  <div class="hdr-l"><div class="dot off" id="dot"></div><div class="hdr-t" id="hdrTitle">BTC TERMINAL PRO</div></div>
   <div class="hdr-time" id="clock">--:--:--</div>
 </div>
 
+<div class="coin-tabs" id="coinTabs">
+  <button class="coin-tab active" data-coin="BTC" onclick="switchCoin('BTC')">BTC</button>
+  <button class="coin-tab" data-coin="ETH" onclick="switchCoin('ETH')">ETH</button>
+  <button class="coin-tab" data-coin="SOL" onclick="switchCoin('SOL')">SOL</button>
+  <button class="coin-tab" data-coin="XRP" onclick="switchCoin('XRP')">XRP</button>
+  <button class="coin-tab" data-coin="HYPE" onclick="switchCoin('HYPE')">HYPE</button>
+  <button class="coin-tab" data-coin="DOGE" onclick="switchCoin('DOGE')">DOGE</button>
+  <button class="coin-tab" data-coin="BNB" onclick="switchCoin('BNB')">BNB</button>
+</div>
+
 <div class="sec glass">
-  <div style="display:flex;align-items:baseline;flex-wrap:wrap">
     <span class="p-big" id="pVal">$--,---.--</span>
     <span class="p-chg" id="pChg"></span>
   </div>
@@ -356,7 +389,7 @@ body{
 </div>
 
 <div class="chart-wrap">
-  <div class="chart-label">BTC/USD · LIVE</div>
+  <div class="chart-label" id="chartLabel">BTC/USD · LIVE</div>
   <canvas id="chart"></canvas>
 </div>
 
@@ -467,7 +500,7 @@ body{
   <div id="obDiv"><div style="text-align:center;font-size:10px;color:var(--t4)">Loading...</div></div>
 </div>
 
-<div class="ftr">Live data · Composite Price (Coinbase + Kraken) · Funding Rate · Kalshi Market · GENIE v5.3</div>
+<div class="ftr">Live data · Composite Price (Coinbase + Kraken) · Funding Rate · Kalshi Market · GENIE v6.0</div>
 </div>
 
 <script>
@@ -478,8 +511,25 @@ var CL = {g:'#00e87b',r:'#ff3b5c',o:'#ffb740',b:'#56d4f5',y:'#ffd700',t1:'#e4ecf
 var HIST_MAX = 300;
 var CHART_PTS = 180;
 
+/* ======== MULTI-CRYPTO CONFIG ======== */
+var COINS=['BTC','ETH','SOL','XRP','HYPE','DOGE','BNB'];
+var activeCoin='BTC';
+var COIN_STATES={};
+var _fetchGen=0;
+var _intervals=[];
+var MARKET_CONFIGS={
+  BTC:{symbol:'BTC',displayName:'Bitcoin',binancePair:'BTCUSDT',binanceBase:'https://api.binance.us/api/v3',binanceFutures:'BTCUSDT',coinbaseProduct:'BTC-USD',krakenPair:'XBTUSD',krakenKey:'XXBTZUSD',kalshiSeries:'KXBTC',wsProductId:'BTC-USD',strikeRound:500,priceDec:2,color:'#f7931a'},
+  ETH:{symbol:'ETH',displayName:'Ethereum',binancePair:'ETHUSDT',binanceBase:'https://api.binance.us/api/v3',binanceFutures:'ETHUSDT',coinbaseProduct:'ETH-USD',krakenPair:'ETHUSD',krakenKey:'XETHZUSD',kalshiSeries:'KXETH',wsProductId:'ETH-USD',strikeRound:50,priceDec:2,color:'#627eea'},
+  SOL:{symbol:'SOL',displayName:'Solana',binancePair:'SOLUSDT',binanceBase:'https://api.binance.us/api/v3',binanceFutures:'SOLUSDT',coinbaseProduct:'SOL-USD',krakenPair:'SOLUSD',krakenKey:'SOLUSD',kalshiSeries:'KXSOL',wsProductId:'SOL-USD',strikeRound:5,priceDec:2,color:'#9945ff'},
+  XRP:{symbol:'XRP',displayName:'XRP',binancePair:'XRPUSDT',binanceBase:'https://api.binance.us/api/v3',binanceFutures:'XRPUSDT',coinbaseProduct:'XRP-USD',krakenPair:'XRPUSD',krakenKey:'XXRPZUSD',kalshiSeries:'KXXRP',wsProductId:'XRP-USD',strikeRound:0.1,priceDec:4,color:'#00aae4'},
+  HYPE:{symbol:'HYPE',displayName:'Hyperliquid',binancePair:'HYPEUSDT',binanceBase:'https://api.binance.com/api/v3',binanceFutures:'HYPEUSDT',coinbaseProduct:null,krakenPair:null,krakenKey:null,kalshiSeries:'KXHYPE',wsProductId:null,strikeRound:1,priceDec:3,color:'#00ffaa'},
+  DOGE:{symbol:'DOGE',displayName:'Dogecoin',binancePair:'DOGEUSDT',binanceBase:'https://api.binance.us/api/v3',binanceFutures:'DOGEUSDT',coinbaseProduct:'DOGE-USD',krakenPair:'XDGUSD',krakenKey:'XDGUSD',kalshiSeries:'KXDOGE',wsProductId:'DOGE-USD',strikeRound:0.01,priceDec:5,color:'#c2a633'},
+  BNB:{symbol:'BNB',displayName:'BNB',binancePair:'BNBUSDT',binanceBase:'https://api.binance.com/api/v3',binanceFutures:'BNBUSDT',coinbaseProduct:null,krakenPair:null,krakenKey:null,kalshiSeries:'KXBNB',wsProductId:null,strikeRound:5,priceDec:2,color:'#f0b90b'}
+};
+function getCfg(){return MARKET_CONFIGS[activeCoin]}
+
 /* ======== STATE ======== */
-var S = {
+function makeDefaultState(){return{
   price:null, lastPrice:null, hist:[], change24h:0, high24h:0, low24h:0, vol24h:0,
   connected:false, ob:{asks:[],bids:[],imb:0},
   ind:null, kal:{tl:900,phase:'early',open:null,wPrices:[]},
@@ -559,7 +609,8 @@ var S = {
   roundDecisionPrice:null,
   _reevalCooldown:0,
   _lastBetAmt:0
-};
+}}
+var S = makeDefaultState();
 var ws=null, wsRT=null;
 
 /* ======== HELPERS ======== */
@@ -1468,7 +1519,7 @@ function genieText(){
     return'Processing multi-indicator analysis...'
   }
   var p=S.price,ind=S.ind,a=S.analysis,kal=S.kal,mode=S.mode;
-  var strike=kal.open||Math.round(p/500)*500;
+  var strike=kal.open||Math.round(p/getCfg().strikeRound)*getCfg().strikeRound;
   var diff=p-strike,side=diff>=0?'above':'below';
   var pts=[];
 
@@ -1477,7 +1528,7 @@ function genieText(){
   else if(mode==='safe')pts.push('[SAFE MODE] Capital preservation protocol engaged.');
   else pts.push('[BALANCED MODE] Standard quantitative analysis.');
 
-  pts.push('BTC at '+fmt$(p)+', '+fmt$(Math.abs(diff),0)+' '+side+' the '+fmt$(strike,0)+' strike.');
+  pts.push(getCfg().symbol+' at '+fmt$(p)+', '+fmt$(Math.abs(diff),0)+' '+side+' the '+fmt$(strike,0)+' strike.');
 
   // Trend — mode-adapted analysis
   if(ind.e9&&ind.e21){
@@ -1811,7 +1862,7 @@ function analyzeTargetPrice(currentPrice,targetPrice,secondsToExpiry,recentPrice
   // ── RATIONALE BULLETS ───────────────────────────────────────────────
   // 1. Current position
   if(Math.abs(pctDist)>0.02){
-    rationale.push('BTC currently '+fmt$(currentPrice)+', '+(diff>0?'+':'')+pctDist.toFixed(3)+'% '+(diff>0?'above':'below')+' the '+fmt$(targetPrice,0)+' target'+(minutesLeft<3?' — with <3 min left, position is dominant':'.'));
+    rationale.push(getCfg().symbol+' currently '+fmt$(currentPrice)+', '+(diff>0?'+':'')+pctDist.toFixed(3)+'% '+(diff>0?'above':'below')+' the '+fmt$(targetPrice,0)+' target'+(minutesLeft<3?' — with <3 min left, position is dominant':'.'));
   }else{
     rationale.push('Price sitting right at the target ('+pctDist.toFixed(3)+'% away) — razor-thin edge, could go either way.');
   }
@@ -2106,7 +2157,7 @@ function render(){
   var pl=kal.phase==='critical'?'CRITICAL':kal.phase==='late'?'LATE':kal.phase==='mid'?'MID ROUND':'ENTRY WINDOW';
   $('tmBar').style.background=pc;
   $('tmPhase').textContent=pl;$('tmPhase').style.color=pc;$('tmPhase').style.border='1px solid '+pc+'35';$('tmPhase').style.background=pc+'12';
-  var strike=kal.open||(p?Math.round(p/500)*500:0);
+  var strike=kal.open||(p?Math.round(p/getCfg().strikeRound)*getCfg().strikeRound:0);
   if(strike)$('tmStrike').textContent='Strike: '+fmt$(strike,0);
 
   // Signal — always ABOVE or BELOW, with BET or LEAN prefix
@@ -2468,24 +2519,27 @@ function updateCompositePrice(){
   S.price=avg;S.hist=S.hist.slice(-(HIST_MAX-1)).concat([avg]);S._chartDirty=true;
 }
 function fetchSpot(){
-  // Fetch from both Coinbase and Kraken, composite for closer-to-Kalshi pricing
-  var p1=fetch('https://api.coinbase.com/v2/prices/BTC-USD/spot').then(function(r){return r.json()}).then(function(d){
-    var a=parseFloat(d&&d.data&&d.data.amount);if(isFinite(a))_priceSources.coinbase=a;
-  }).catch(function(){});
-  var p2=fetch('https://api.kraken.com/0/public/Ticker?pair=XBTUSD').then(function(r){return r.json()}).then(function(d){
-    if(d&&d.result){var k=d.result.XXBTZUSD||d.result.XBTUSD;if(k){var a=parseFloat(k.c[0]);if(isFinite(a))_priceSources.kraken=a}}
-  }).catch(function(){});
-  return Promise.all([p1,p2]).then(function(){updateCompositePrice()})
+  var gen=_fetchGen,cfg=getCfg();
+  var p1=cfg.coinbaseProduct?fetch('https://api.coinbase.com/v2/prices/'+cfg.coinbaseProduct+'/spot').then(function(r){return r.json()}).then(function(d){
+    if(gen!==_fetchGen)return;var a=parseFloat(d&&d.data&&d.data.amount);if(isFinite(a))_priceSources.coinbase=a;
+  }).catch(function(){}):Promise.resolve();
+  var p2=cfg.krakenPair?fetch('https://api.kraken.com/0/public/Ticker?pair='+cfg.krakenPair).then(function(r){return r.json()}).then(function(d){
+    if(gen!==_fetchGen)return;if(d&&d.result){var k=d.result[cfg.krakenKey]||d.result[cfg.krakenPair];if(k){var a=parseFloat(k.c[0]);if(isFinite(a))_priceSources.kraken=a}}
+  }).catch(function(){}):Promise.resolve();
+  return Promise.all([p1,p2]).then(function(){if(gen===_fetchGen)updateCompositePrice()})
 }
 function fetch24h(){
-  return fetch('https://api.binance.us/api/v3/ticker/24hr?symbol=BTCUSDT').then(function(r){return r.json()}).then(function(d){
-    S.change24h=parseFloat(d.priceChangePercent)||0;S.high24h=parseFloat(d.highPrice)||0;
+  var gen=_fetchGen,cfg=getCfg();
+  return fetch(cfg.binanceBase+'/ticker/24hr?symbol='+cfg.binancePair).then(function(r){return r.json()}).then(function(d){
+    if(gen!==_fetchGen)return;S.change24h=parseFloat(d.priceChangePercent)||0;S.high24h=parseFloat(d.highPrice)||0;
     S.low24h=parseFloat(d.lowPrice)||0;S.vol24h=parseFloat(d.quoteVolume)||0
   }).catch(function(){})
 }
 function fetchOB(){
   if(!S.price)return;
-  fetch('https://api.binance.us/api/v3/depth?symbol=BTCUSDT&limit=10').then(function(r){return r.json()}).then(function(d){
+  var gen=_fetchGen,cfg=getCfg();
+  fetch(cfg.binanceBase+'/depth?symbol='+cfg.binancePair+'&limit=10').then(function(r){return r.json()}).then(function(d){
+    if(gen!==_fetchGen)return;
     var asks=(d.asks||[]).map(function(a){return{pr:parseFloat(a[0]),sz:parseFloat(a[1])}});
     var bids=(d.bids||[]).map(function(b){return{pr:parseFloat(b[0]),sz:parseFloat(b[1])}});
     var tb=0,ta=0;for(var i=0;i<bids.length;i++)tb+=bids[i].sz;for(var i=0;i<asks.length;i++)ta+=asks[i].sz;
@@ -2493,24 +2547,29 @@ function fetchOB(){
   }).catch(function(){})
 }
 function fetchKlines(){
-  return fetch('https://api.binance.us/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=180').then(function(r){return r.json()}).then(function(d){
+  var gen=_fetchGen,cfg=getCfg();
+  return fetch(cfg.binanceBase+'/klines?symbol='+cfg.binancePair+'&interval=1m&limit=180').then(function(r){return r.json()}).then(function(d){
+    if(gen!==_fetchGen)return;
     if(Array.isArray(d)&&d.length>0){
       S.hist=d.map(function(k){return parseFloat(k[4])});
-      S.histVol=d.map(function(k){return parseFloat(k[5])||0}); // real BTC volume per candle
+      S.histVol=d.map(function(k){return parseFloat(k[5])||0});
       S._chartDirty=true
     }
   }).catch(function(){})
 }
 function fetchKlines15m(){
-  return fetch('https://api.binance.us/api/v3/klines?symbol=BTCUSDT&interval=15m&limit=96').then(function(r){return r.json()}).then(function(d){
+  var gen=_fetchGen,cfg=getCfg();
+  return fetch(cfg.binanceBase+'/klines?symbol='+cfg.binancePair+'&interval=15m&limit=96').then(function(r){return r.json()}).then(function(d){
+    if(gen!==_fetchGen)return;
     if(Array.isArray(d)&&d.length>0){S.hist15m=d.map(function(k){return parseFloat(k[4])})}
   }).catch(function(){})
 }
 
-/* ======== FUNDING RATE — Leading indicator for BTC short-term direction ======== */
+/* ======== FUNDING RATE — Leading indicator for short-term direction ======== */
 function fetchFundingRate(){
-  // Binance Futures funding rate (public, no auth). Falls back gracefully.
-  fetch('https://fapi.binance.com/fapi/v1/fundingRate?symbol=BTCUSDT&limit=1').then(function(r){return r.json()}).then(function(d){
+  var gen=_fetchGen,cfg=getCfg();
+  fetch('https://fapi.binance.com/fapi/v1/fundingRate?symbol='+cfg.binanceFutures+'&limit=1').then(function(r){return r.json()}).then(function(d){
+    if(gen!==_fetchGen)return;
     if(Array.isArray(d)&&d.length>0){
       S.fundingRate=parseFloat(d[0].fundingRate)||0;
       S.fundingNext=parseInt(d[0].fundingTime)||0;
@@ -2520,11 +2579,10 @@ function fetchFundingRate(){
 
 /* ======== KALSHI MARKET DATA — implied probability from prediction market ======== */
 function fetchKalshiMarket(){
-  // Kalshi public market snapshot for BTC 15-min contracts
-  // Using the public REST endpoint — markets matching BTC short-term
-  fetch('https://api.elections.kalshi.com/trade-api/v2/markets?status=open&series_ticker=KXBTC&limit=5').then(function(r){return r.json()}).then(function(d){
+  var gen=_fetchGen,cfg=getCfg();
+  fetch('https://api.elections.kalshi.com/trade-api/v2/markets?status=open&series_ticker='+cfg.kalshiSeries+'&limit=5').then(function(r){return r.json()}).then(function(d){
+    if(gen!==_fetchGen)return;
     if(d&&d.markets&&d.markets.length>0){
-      // Find the contract closest to current time
       var best=d.markets[0];
       for(var i=1;i<d.markets.length;i++){
         var mExp=new Date(d.markets[i].close_time||0).getTime();
@@ -2542,17 +2600,19 @@ function fetchKalshiMarket(){
 }
 
 function connectWS(){
+  var cfg=getCfg();
+  if(!cfg.wsProductId)return; // no WS for this coin, rely on REST polling
   if(ws&&ws.readyState===WebSocket.OPEN)return;
   try{
     ws=new WebSocket('wss://ws-feed.exchange.coinbase.com');
-    ws.onopen=function(){ws.send(JSON.stringify({type:'subscribe',channels:[{name:'ticker',product_ids:['BTC-USD']}]}));S.connected=true};
+    ws.onopen=function(){ws.send(JSON.stringify({type:'subscribe',channels:[{name:'ticker',product_ids:[cfg.wsProductId]}]}));S.connected=true};
     ws.onmessage=function(e){
       try{var m=JSON.parse(e.data);
-        if(m.type==='ticker'&&m.product_id==='BTC-USD'){
+        if(m.type==='ticker'&&m.product_id===getCfg().wsProductId){
           var p=parseFloat(m.price);if(!isFinite(p))return;
           _priceSources.coinbase=p;var now=Date.now();
           if(now-S._lhp>1000){S._lhp=now;updateCompositePrice()}
-          else{S.price=p} // fast tick update even without full composite
+          else{S.price=p}
         }
       }catch(x){}
     };
@@ -2604,7 +2664,7 @@ function updateTimer(){
 /* ======== MAIN LOOP ======== */
 function tick(){
   updateTimer();
-  var strike=parseFloat(($('inTarget')||{}).value)||S.kal.open||(S.price?Math.round(S.price/500)*500:0);
+  var strike=parseFloat(($('inTarget')||{}).value)||S.kal.open||(S.price?Math.round(S.price/getCfg().strikeRound)*getCfg().strikeRound:0);
   S.ind=computeInd(S.hist);
   S.ind15m=S.hist15m.length>=26?computeInd(S.hist15m):null;
   S.traj=trajectory(S.hist,S.kal.tl);
@@ -2630,28 +2690,98 @@ function genieTick(){
   S.logs=[{line:shortLine,ts:ts()}].concat(S.logs).slice(0,6)
 }
 
-function startPoll(){
-  setInterval(function(){
+function stopPolling(){
+  for(var i=0;i<_intervals.length;i++)clearInterval(_intervals[i]);
+  _intervals=[];
+}
+
+function startAllPolling(){
+  stopPolling();
+  _intervals.push(setInterval(fetch24h,12000));
+  _intervals.push(setInterval(fetchOB,2500));
+  _intervals.push(setInterval(fetchKlines15m,120000));
+  _intervals.push(setInterval(fetchFundingRate,60000));
+  _intervals.push(setInterval(fetchKalshiMarket,15000));
+  _intervals.push(setInterval(tick,1000));
+  _intervals.push(setInterval(genieTick,4000));
+  _intervals.push(setInterval(saveState,5000));
+  _intervals.push(setInterval(function(){
     if(!ws||ws.readyState!==WebSocket.OPEN){
       fetchSpot().then(function(){S.connected=true}).catch(function(){S.connected=false})
     }
-  },2000)
+  },2000));
+}
+
+function updateTabUI(){
+  var tabs=document.querySelectorAll('.coin-tab');
+  for(var i=0;i<tabs.length;i++){
+    tabs[i].className='coin-tab'+(tabs[i].getAttribute('data-coin')===activeCoin?' active':'');
+  }
+}
+
+function updateLabels(){
+  var cfg=getCfg();
+  if($('hdrTitle'))$('hdrTitle').textContent=cfg.symbol+' TERMINAL PRO';
+  if($('chartLabel'))$('chartLabel').textContent=cfg.symbol+'/USD · LIVE';
+  document.title=cfg.symbol+' Terminal Pro';
+}
+
+function switchCoin(sym){
+  if(sym===activeCoin)return;
+  _fetchGen++;
+  // Save current coin state
+  COIN_STATES[activeCoin]=JSON.parse(JSON.stringify(S));
+  // Close WS
+  if(ws){ws.onclose=null;ws.close();ws=null}
+  if(wsRT){clearTimeout(wsRT);wsRT=null}
+  // Stop all intervals
+  stopPolling();
+  // Switch active coin
+  activeCoin=sym;
+  // Load or create state
+  if(COIN_STATES[sym]){
+    var ns=JSON.parse(JSON.stringify(COIN_STATES[sym]));
+    var keys=Object.keys(S);for(var i=0;i<keys.length;i++)delete S[keys[i]];
+    var nk=Object.keys(ns);for(var i=0;i<nk.length;i++)S[nk[i]]=ns[nk[i]];
+  }else{
+    var fresh=makeDefaultState();
+    var keys=Object.keys(S);for(var i=0;i<keys.length;i++)delete S[keys[i]];
+    var nk=Object.keys(fresh);for(var i=0;i<nk.length;i++)S[nk[i]]=fresh[nk[i]];
+  }
+  // Reset price sources
+  _priceSources={coinbase:null,kraken:null};
+  S._chartDirty=true;
+  // Update UI
+  updateTabUI();updateLabels();setupChart();
+  // Start data for new coin
+  Promise.all([fetchKlines(),fetchKlines15m(),fetchSpot(),fetch24h()]).then(function(){
+    connectWS();startAllPolling();
+    fetchFundingRate();fetchKalshiMarket();
+    tick();setTimeout(genieTick,500);
+  }).catch(function(){
+    connectWS();startAllPolling();
+    fetchFundingRate();fetchKalshiMarket();
+  });
 }
 
 /* ======== STATE PERSISTENCE ======== */
 function saveState(){
   try{
     var bank=parseFloat(($('inBank')||{}).value)||0;
-    localStorage.setItem('btcTerminalState',JSON.stringify({
+    var key='terminalState_'+activeCoin;
+    localStorage.setItem(key,JSON.stringify({
       mode:S.mode,bankroll:bank,peakBank:S.risk.peakBank,
       totalPnL:S.risk.totalPnL,sessionBets:S.risk.sessionBets,
       sessionWins:S.risk.sessionWins,sessionLosses:S.risk.sessionLosses
     }));
+    localStorage.setItem('terminalActiveCoin',activeCoin);
   }catch(e){}
 }
 function restoreState(){
   try{
-    var saved=JSON.parse(localStorage.getItem('btcTerminalState')||'{}');
+    var coin=localStorage.getItem('terminalActiveCoin');
+    if(coin&&MARKET_CONFIGS[coin]){activeCoin=coin}
+    var saved=JSON.parse(localStorage.getItem('terminalState_'+activeCoin)||'{}');
     if(saved.mode){S.mode=saved.mode;setMode(saved.mode);}
     if(saved.bankroll&&$('inBank'))$('inBank').value=saved.bankroll;
     if(saved.peakBank)S.risk.peakBank=saved.peakBank;
@@ -2665,26 +2795,17 @@ function restoreState(){
 /* ======== INIT ======== */
 function init(){
   restoreState();
+  updateTabUI();updateLabels();
   setupChart();chartLoop();
   window.addEventListener('resize',function(){setupChart()});
 
   Promise.all([fetchKlines(),fetchKlines15m(),fetchSpot(),fetch24h()]).then(function(){
-    connectWS();startPoll();
-    setInterval(fetch24h,12000);setInterval(fetchOB,2500);
-    setInterval(fetchKlines15m,120000);
-    fetchFundingRate();setInterval(fetchFundingRate,60000);
-    fetchKalshiMarket();setInterval(fetchKalshiMarket,15000);
-    setInterval(tick,1000);setInterval(genieTick,4000);
+    connectWS();startAllPolling();
+    fetchFundingRate();fetchKalshiMarket();
     tick();setTimeout(genieTick,1500);
-    setInterval(saveState,5000)
   }).catch(function(){
-    connectWS();startPoll();
-    setInterval(fetch24h,12000);setInterval(fetchOB,2500);
-    setInterval(fetchKlines15m,120000);
-    fetchFundingRate();setInterval(fetchFundingRate,60000);
-    fetchKalshiMarket();setInterval(fetchKalshiMarket,15000);
-    setInterval(tick,1000);setInterval(genieTick,4000);
-    setInterval(saveState,5000)
+    connectWS();startAllPolling();
+    fetchFundingRate();fetchKalshiMarket();
   })
 }
 
