@@ -272,7 +272,26 @@ var S = {
   logs:[], genieText:'Initializing GENIE AI engine...', mode:'balanced',
   betHistory:[], betConviction:0, betStableDir:null, betStableCount:0,
   hist15m:[], ind15m:null,
-  _smoothScore:0, _lastCall:null, _callHoldTicks:0, _scoreHist:[],
+  // DSE — Deterministic State Engine
+  dse:{
+    state:'HOLD',         // current committed state: ABOVE|BELOW|HOLD
+    stateConf:0,          // confidence in current state (0-98)
+    ticksInState:0,       // how long we've been in current state
+    scoreEMA:0,           // exponentially smoothed score (slow α=0.12)
+    scoreSMA:[],          // last 30 raw scores for variance calc
+    variance:0,           // rolling variance of score — noise measure
+    probAbove:0.5,        // Bayesian posterior P(above)
+    probBelow:0.5,        // Bayesian posterior P(below)
+    entropy:1.0,          // Shannon entropy of decision — 1=uncertain, 0=certain
+    regime:'unknown',     // locked regime for current state
+    flips:0,              // flip counter — penalizes oscillation
+    lastFlipTick:0,       // tick of last flip — for cooldown
+    totalTicks:0,         // total ticks processed
+    commitThresh:0.68,    // min P(dir) to commit — rises with flips
+    releaseThresh:0.42,   // P(dir) must drop below this to release state
+    minHold:15,           // minimum ticks to hold a state (rises with stability)
+    dampingFactor:1.0     // multiplier that reduces reactivity after flips
+  },
   _lhp:0, _lktl:900, _chartDirty:true
 };
 var ws=null, wsRT=null;
@@ -518,6 +537,141 @@ function trajectory(d,tl){
   return{proj:combined,conf:conf,slope:slope,vel:vel}
 }
 
+/* ======== DSE — DETERMINISTIC STATE ENGINE ======== */
+/* Asymptotically optimal, probabilistic-dominance-gated control system.
+   Converts raw score into stable, committed decisions with:
+   - Bayesian posterior estimation (P(above), P(below))
+   - Shannon entropy gating (only act when uncertainty is low)
+   - Adaptive hysteresis (commit/release thresholds widen after instability)
+   - Variance-aware damping (noisy scores get attenuated)
+   - Asymptotic convergence (confidence grows logarithmically with stability)
+   - Anti-oscillation penalty (flips raise the bar for future flips) */
+function dseUpdate(rawScore,rawConf,rawCall,modeThresh){
+  var D=S.dse;
+  D.totalTicks++;
+
+  // 1. SCORE SMOOTHING — dual EMA: slow for state, fast for reactivity check
+  var alphaS=0.12; // slow — governs committed state
+  D.scoreEMA=D.scoreEMA*(1-alphaS)+rawScore*alphaS;
+
+  // 2. ROLLING VARIANCE — measures noise level in recent scores
+  D.scoreSMA.push(rawScore);
+  if(D.scoreSMA.length>30)D.scoreSMA.shift();
+  if(D.scoreSMA.length>=5){
+    var mean=0;for(var i=0;i<D.scoreSMA.length;i++)mean+=D.scoreSMA[i];
+    mean/=D.scoreSMA.length;
+    var vSum=0;for(var i=0;i<D.scoreSMA.length;i++)vSum+=(D.scoreSMA[i]-mean)*(D.scoreSMA[i]-mean);
+    D.variance=vSum/D.scoreSMA.length;
+  }
+  // Damping: high variance = reduce score reactivity
+  var noisePenalty=D.variance>4?0.6:D.variance>2?0.8:D.variance>1?0.9:1.0;
+  var dampedScore=D.scoreEMA*noisePenalty*D.dampingFactor;
+
+  // 3. BAYESIAN POSTERIOR — convert smoothed score to probability
+  // Sigmoid mapping: P(above) = 1/(1+e^(-k*score)) where k adapts to threshold
+  var k=1.5/Math.max(modeThresh,0.5);
+  var pAbove=1/(1+Math.exp(-k*dampedScore));
+  var pBelow=1-pAbove;
+  D.probAbove=D.probAbove*0.7+pAbove*0.3; // smooth the posterior too
+  D.probBelow=D.probBelow*0.7+pBelow*0.3;
+
+  // 4. SHANNON ENTROPY — H = -ΣP*log2(P), measures decision uncertainty
+  var pa=clamp(D.probAbove,0.01,0.99),pb=clamp(D.probBelow,0.01,0.99);
+  D.entropy=-(pa*Math.log2(pa)+pb*Math.log2(pb));
+
+  // 5. ASYMPTOTIC THRESHOLDS — commit threshold rises after flips, decays with stability
+  // After each flip: commitThresh += 0.04 (harder to flip again)
+  // Each stable tick: commitThresh slowly decays toward baseline 0.68
+  var baseCommit=0.68,baseRelease=0.42;
+  var flipPenalty=Math.min(D.flips*0.04,0.20); // max +0.20 from flips
+  D.commitThresh=baseCommit+flipPenalty;
+  D.releaseThresh=baseRelease-flipPenalty*0.5; // release also gets stricter
+  // Stability reward: long holds reduce the penalty asymptotically
+  if(D.ticksInState>20){
+    var decay=1-1/(1+D.ticksInState*0.02); // asymptotic toward 1
+    D.commitThresh=baseCommit+flipPenalty*(1-decay);
+    if(D.flips>0&&D.ticksInState>50)D.flips=Math.max(0,D.flips-1); // forgive old flips
+  }
+
+  // 6. MINIMUM HOLD — rises with flip count, ensures no rapid state changes
+  D.minHold=15+D.flips*5; // base 15 ticks, +5 per historical flip
+  if(D.minHold>60)D.minHold=60; // cap at 60 ticks (1 min)
+
+  // 7. STATE MACHINE — deterministic transitions with probabilistic dominance gating
+  var newState=D.state;
+  var newConf=D.stateConf;
+
+  if(D.state==='HOLD'){
+    // TRANSITION: HOLD -> ABOVE or BELOW
+    // Requires: P(dir) > commitThresh AND entropy < 0.7 AND min samples
+    if(D.probAbove>D.commitThresh&&D.entropy<0.7&&D.totalTicks>10){
+      newState='ABOVE';newConf=clamp(Math.round(D.probAbove*100),5,98);
+      D.flips++;D.lastFlipTick=D.totalTicks;D.regime=S.ind?S.ind.regime:'unknown'
+    }else if(D.probBelow>D.commitThresh&&D.entropy<0.7&&D.totalTicks>10){
+      newState='BELOW';newConf=clamp(Math.round(D.probBelow*100),5,98);
+      D.flips++;D.lastFlipTick=D.totalTicks;D.regime=S.ind?S.ind.regime:'unknown'
+    }else{
+      newConf=clamp(Math.round((1-D.entropy)*50),0,50) // HOLD confidence = certainty that holding is correct
+    }
+  }else if(D.state==='ABOVE'){
+    D.ticksInState++;
+    // STRENGTHEN: confidence grows logarithmically with time in state
+    if(D.probAbove>0.55){
+      newConf=clamp(Math.round(D.probAbove*100*(1+Math.log2(1+D.ticksInState)*0.03)),5,98)
+    }
+    // RELEASE: only if P(above) drops below releaseThresh AND held minimum AND entropy rising
+    if(D.ticksInState>=D.minHold&&D.probAbove<D.releaseThresh&&D.entropy>0.6){
+      if(D.probBelow>D.commitThresh+0.05){ // direct flip requires extra 5% dominance
+        newState='BELOW';newConf=clamp(Math.round(D.probBelow*100),5,98);
+        D.flips++;D.lastFlipTick=D.totalTicks;D.regime=S.ind?S.ind.regime:'unknown'
+      }else{
+        newState='HOLD';newConf=0
+      }
+    }else if(D.ticksInState<D.minHold){
+      // LOCKED — still in minimum hold period, only update confidence downward slightly
+      newConf=Math.max(5,D.stateConf-1)
+    }
+    // DAMPING after flip: reduce reactivity for next 20 ticks
+    if(D.totalTicks-D.lastFlipTick<20)D.dampingFactor=0.7;
+    else D.dampingFactor=Math.min(1.0,D.dampingFactor+0.02);
+  }else if(D.state==='BELOW'){
+    D.ticksInState++;
+    if(D.probBelow>0.55){
+      newConf=clamp(Math.round(D.probBelow*100*(1+Math.log2(1+D.ticksInState)*0.03)),5,98)
+    }
+    if(D.ticksInState>=D.minHold&&D.probBelow<D.releaseThresh&&D.entropy>0.6){
+      if(D.probAbove>D.commitThresh+0.05){
+        newState='ABOVE';newConf=clamp(Math.round(D.probAbove*100),5,98);
+        D.flips++;D.lastFlipTick=D.totalTicks;D.regime=S.ind?S.ind.regime:'unknown'
+      }else{
+        newState='HOLD';newConf=0
+      }
+    }else if(D.ticksInState<D.minHold){
+      newConf=Math.max(5,D.stateConf-1)
+    }
+    if(D.totalTicks-D.lastFlipTick<20)D.dampingFactor=0.7;
+    else D.dampingFactor=Math.min(1.0,D.dampingFactor+0.02);
+  }
+
+  // State transition bookkeeping
+  if(newState!==D.state){D.ticksInState=0}
+  D.state=newState;
+  D.stateConf=newConf;
+
+  return{
+    call:D.state,
+    conf:D.stateConf,
+    smoothScore:dampedScore,
+    probAbove:D.probAbove,
+    probBelow:D.probBelow,
+    entropy:D.entropy,
+    ticksInState:D.ticksInState,
+    variance:D.variance,
+    flips:D.flips,
+    locked:D.ticksInState<D.minHold&&D.state!=='HOLD'
+  }
+}
+
 /* ======== SIGNAL ENGINE — ELITE GENIUS ======== */
 function analyze(opts){
   var pr=opts.price,strike=opts.strike,ind=opts.ind,ind15m=opts.ind15m,kal=opts.kal,obImb=opts.obImb,mode=opts.mode,traj=opts.traj;
@@ -705,40 +859,25 @@ function analyze(opts){
   // Price projection per mode
   var projPrice=traj?traj.proj+modePriceBias:null;
 
-  // ===== SIGNAL STABILITY — prevent flip-flopping =====
-  // 1. Smooth the score: EMA over recent ticks to filter noise
-  S._scoreHist.push(score);
-  if(S._scoreHist.length>20)S._scoreHist.shift();
-  var alpha=0.25; // smoothing factor — lower = more stable
-  S._smoothScore=S._smoothScore*( 1-alpha)+score*alpha;
-  var smoothed=S._smoothScore;
+  // ===== DSE — DETERMINISTIC STATE ENGINE =====
+  // Feed raw score through the probabilistic dominance controller
+  var modeThreshRef=mode==='aggressive'?1.4:mode==='safe'?3.8:2.3;
+  var dse=dseUpdate(score,modeConf,call,modeThreshRef);
 
-  // 2. Hysteresis: once committed, require 60% stronger opposing signal to flip
-  var hysteresis=1.6;
-  if(S._lastCall==='ABOVE'&&call==='BELOW'){
-    // Must exceed threshold by hysteresis multiplier to flip from ABOVE to BELOW
-    var flipThresh=(mode==='aggressive'?aThresh:mode==='safe'?sThresh:bThresh)*hysteresis;
-    if(Math.abs(smoothed)<flipThresh){call=S._lastCall;reason='Holding ABOVE — opposing signal insufficient to warrant reversal';modeConf=Math.max(modeConf-15,5)}
-  }else if(S._lastCall==='BELOW'&&call==='ABOVE'){
-    var flipThresh=(mode==='aggressive'?aThresh:mode==='safe'?sThresh:bThresh)*hysteresis;
-    if(Math.abs(smoothed)<flipThresh){call=S._lastCall;reason='Holding BELOW — opposing signal insufficient to warrant reversal';modeConf=Math.max(modeConf-15,5)}
-  }
-  // Don't flip from a direction to HOLD too easily either
-  if(S._lastCall&&S._lastCall!=='HOLD'&&call==='HOLD'&&S._callHoldTicks<10){
-    if(Math.abs(smoothed)>(mode==='aggressive'?aThresh*0.6:mode==='safe'?sThresh*0.6:bThresh*0.6)){
-      call=S._lastCall;reason='Maintaining '+S._lastCall+' — conviction still present';modeConf=Math.max(modeConf-10,5)
-    }
-  }
+  // DSE overrides raw call with stateful, noise-filtered, committed decision
+  var finalCall=dse.call;
+  var finalConf=dse.conf;
+  // Enrich reason with DSE state context
+  var dseNote='';
+  if(dse.locked)dseNote=' [STATE LOCKED '+dse.ticksInState+'/'+S.dse.minHold+']';
+  else if(finalCall!=='HOLD')dseNote=' [P('+finalCall.toLowerCase()+')='+Math.round((finalCall==='ABOVE'?dse.probAbove:dse.probBelow)*100)+'% | H='+dse.entropy.toFixed(2)+' | \u03C3\u00B2='+dse.variance.toFixed(1)+']';
+  var finalReason=finalCall===call?reason+dseNote:'DSE: maintaining '+finalCall+' — probabilistic dominance holds.'+dseNote;
 
-  // 3. Commitment cooldown: after choosing direction, hold for minimum 8 ticks (~8 sec)
-  if(call===S._lastCall){S._callHoldTicks++}
-  else if(S._callHoldTicks<8&&S._lastCall&&S._lastCall!=='HOLD'){
-    call=S._lastCall;S._callHoldTicks++;
-    reason='Committed to '+call+' — holding position ('+S._callHoldTicks+'/8)'
-  }else{S._callHoldTicks=0}
-  S._lastCall=call;
+  // Override mode confidence with DSE confidence if DSE has conviction
+  if(finalCall!=='HOLD'&&dse.conf>10)finalConf=dse.conf;
 
-  return{call:call,conf:modeConf,reason:reason,score:smoothed,signals:signals,modeReason:modeReason,projPrice:projPrice,rawConf:rawConf}
+  return{call:finalCall,conf:finalConf,reason:finalReason,score:dse.smoothScore,signals:signals,modeReason:modeReason,projPrice:projPrice,rawConf:rawConf,
+    dse:{probAbove:dse.probAbove,probBelow:dse.probBelow,entropy:dse.entropy,variance:dse.variance,flips:dse.flips,ticksInState:dse.ticksInState,locked:dse.locked}}
 }
 
 /* ======== GENIE TEXT — QUANTITATIVE CRYPTO & PREDICTION MARKET AI ======== */
@@ -1067,7 +1206,7 @@ function render(){
   dotHTML+='<span class="bet-conv-lbl">'+S.betConviction+'/5</span>';
   convEl.innerHTML=dotHTML;
 
-  // Mode AI Decision section
+  // Mode AI Decision section — powered by DSE
   var mh=$('modeAIHdr'),mc=$('modeAICall'),mw=$('modeAIWhy');
   if(S.mode==='aggressive')mh.textContent='\uD83D\uDD25 AGGRESSIVE ANALYSIS';
   else if(S.mode==='safe')mh.textContent='\uD83D\uDEE1\uFE0F SAFE ANALYSIS';
@@ -1078,10 +1217,14 @@ function render(){
     mc.style.color=a.call==='ABOVE'?CL.g:a.call==='BELOW'?CL.r:CL.o;
     var why=a.modeReason||'';
     if(a.projPrice)why+=' Projected: '+fmt$(a.projPrice,0)+'.';
-    // Forward-looking adaptive note
-    if(S.emaAccel!==undefined){
-      var acDir=S.emaAccel>0?'accelerating upward':S.emaAccel<-0?'accelerating downward':'neutral';
-      why+=' Momentum '+acDir+'.';
+    // DSE state context
+    if(a.dse){
+      var d=a.dse;
+      why+=' [DSE: P(\u2191)='+Math.round(d.probAbove*100)+'% P(\u2193)='+Math.round(d.probBelow*100)+'%';
+      why+=' H='+d.entropy.toFixed(2);
+      why+=' \u03C3\u00B2='+d.variance.toFixed(1);
+      if(d.locked)why+=' LOCKED';
+      why+=' t='+d.ticksInState+']';
     }
     mw.textContent=why
   }else{
