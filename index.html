@@ -92,6 +92,19 @@ body{background:var(--bg);color:var(--t2);font-family:'Inter',-apple-system,Blin
 .bet-amt{font-size:26px;font-weight:900;color:var(--b);font-variant-numeric:tabular-nums;transition:color .3s}
 .bet-note{font-size:9px;color:var(--t4);margin-top:4px}
 
+/* Lock Inner (inside signal card) */
+.lock-inner{margin-top:14px;padding:10px 12px;border-radius:8px;font-size:10px;font-weight:700;letter-spacing:.06em;display:none;border:1px solid var(--bd);background:var(--cd);color:var(--t3);transition:all .4s}
+.lock-inner.active{display:block}
+.lock-inner.locked-up{background:#001a11;border-color:var(--g);color:var(--g)}
+.lock-inner.locked-dn{background:#1a0008;border-color:var(--r);color:var(--r)}
+.lock-inner.building{border-color:var(--b);color:var(--b);background:#00d4ff08}
+
+/* Mode AI Decision */
+.mode-ai{margin-top:12px;padding:12px;border-radius:10px;background:var(--cd);border:1px solid var(--bd);text-align:center}
+.mode-ai-hdr{font-size:8px;font-weight:700;letter-spacing:.14em;color:var(--t4);margin-bottom:6px}
+.mode-ai-call{font-size:20px;font-weight:900;color:var(--t2);transition:color .3s}
+.mode-ai-why{font-size:9px;color:var(--t3);margin-top:4px;line-height:1.5;letter-spacing:.01em}
+
 /* GENIE Analysis */
 .genie-text{font-size:11px;color:var(--t2);line-height:1.65;letter-spacing:.015em}
 .genie-logs{max-height:72px;overflow-y:auto;margin-top:8px}
@@ -167,6 +180,7 @@ body{background:var(--bg);color:var(--t2);font-family:'Inter',-apple-system,Blin
   <div class="sig-sub" id="sigSub">Collecting market intelligence...</div>
   <div class="conf-row"><span>CONFIDENCE</span><span id="confPct">--%</span></div>
   <div class="conf-trk"><div class="conf-fill" id="confFill" style="width:0%"></div></div>
+  <div class="lock-inner" id="lockInner"></div>
 </div>
 
 <div class="lock" id="lockBnr"></div>
@@ -181,6 +195,11 @@ body{background:var(--bg);color:var(--t2);font-family:'Inter',-apple-system,Blin
     <button class="mode-btn" data-m="safe" onclick="setMode('safe')">&#x1F6E1;&#xFE0F; SAFE</button>
     <button class="mode-btn active" data-m="balanced" onclick="setMode('balanced')">&#x2696;&#xFE0F; BALANCED</button>
     <button class="mode-btn" data-m="aggressive" onclick="setMode('aggressive')">&#x1F525; AGGRESSIVE</button>
+  </div>
+  <div class="mode-ai" id="modeAI">
+    <div class="mode-ai-hdr" id="modeAIHdr">BALANCED ANALYSIS</div>
+    <div class="mode-ai-call" id="modeAICall">--</div>
+    <div class="mode-ai-why" id="modeAIWhy">Select a mode and enter bankroll for mode-specific AI decision</div>
   </div>
   <div class="bet-sug" id="betSug">
     <div class="bet-lbl">GENIE SUGGESTS</div>
@@ -572,97 +591,209 @@ function analyze(opts){
   var nearRound=Math.abs(pr%1000)<100||Math.abs(pr%1000)>900;
   if(nearRound&&stPct<0.3)score*=0.9; // reduce confidence near round numbers (noise)
 
-  // Threshold based on mode
-  var thresh=mode==='aggressive'?1.6:mode==='safe'?3.2:2.3;
+  // ===== MODE-ADAPTIVE INTELLIGENCE =====
+  // Each mode is a fundamentally different quant strategy, not just a risk slider
   var maxS=9.5;
-  var conf=clamp(Math.round((Math.abs(score)/maxS)*100),0,98);
+  var rawConf=clamp(Math.round((Math.abs(score)/maxS)*100),0,98);
 
-  var call,reason;
-  if(score>=thresh){call='ABOVE';reason='Bullish confluence confirmed \u2014 BET ABOVE STRIKE'}
-  else if(score<=-thresh){call='BELOW';reason='Bearish confluence confirmed \u2014 BET BELOW STRIKE'}
-  else{call='HOLD';reason='Insufficient edge \u2014 standing aside this round'}
+  var call,reason,modeConf,modeReason,modePriceBias;
 
-  return{call:call,conf:conf,reason:reason,score:score,signals:signals}
+  if(mode==='aggressive'){
+    // AGGRESSIVE: Momentum-chasing quant — trades on early signals, maximizes edge extraction
+    // Lower bar to enter, amplifies directional conviction, trades volatile regimes
+    var aThresh=1.4;
+    var aScore=score*(1+Math.abs(ind.mom)*3); // amplify by momentum magnitude
+    modeConf=clamp(Math.round((Math.abs(aScore)/maxS)*110),0,98); // inflated confidence
+    modePriceBias=traj?traj.slope*2.5:0; // extrapolate aggressively
+    if(aScore>=aThresh){call='ABOVE';reason='Strong bullish momentum — aggressive entry ABOVE'}
+    else if(aScore<=-aThresh){call='BELOW';reason='Bearish momentum accelerating — aggressive entry BELOW'}
+    else{call='HOLD';reason='No clear momentum edge — standing aside'}
+    modeReason=call!=='HOLD'?'Momentum-capture strategy: early entry on directional signals. '+
+      (ind.mc&&ind.mc.crossUp?'Fresh MACD cross amplifies conviction. ':ind.mc&&ind.mc.crossDown?'MACD bearish cross confirms selling pressure. ':'')+
+      'Regime: '+ind.regime.replace('_',' ')+'. Risk-on approach targeting maximum edge extraction.':
+      'Waiting for strong directional catalyst. Even aggressive mode requires quantifiable momentum before deploying capital.'
+
+  }else if(mode==='safe'){
+    // SAFE: Capital preservation quant — only trades ironclad setups, multiple confirmations required
+    // Needs trend + oscillator + momentum all aligned, avoids volatile/compression regimes
+    var sThresh=3.8;
+    var sScore=score*0.75; // dampen signal
+    var regimePenalty=(regime==='volatile'||regime==='compression')?0.4:1.0;
+    sScore*=regimePenalty;
+    modeConf=clamp(Math.round((Math.abs(sScore)/maxS)*80),0,98); // conservative confidence
+    modePriceBias=traj?traj.slope*0.5:0; // conservative projection
+    // Require at least 3 aligned strong categories
+    var strongUp=0,strongDn=0;
+    if(trendScore>0.5)strongUp++;if(trendScore<-0.5)strongDn++;
+    if(oscScore>0.3)strongUp++;if(oscScore<-0.3)strongDn++;
+    if(momScore>0.3)strongUp++;if(momScore<-0.3)strongDn++;
+    if(flowScore>0.2)strongUp++;if(flowScore<-0.2)strongDn++;
+    var multiConfirm=Math.max(strongUp,strongDn)>=3;
+    if(sScore>=sThresh&&multiConfirm){call='ABOVE';reason='Multi-confirmed bullish setup — safe entry ABOVE'}
+    else if(sScore<=-sThresh&&multiConfirm){call='BELOW';reason='Multi-confirmed bearish setup — safe entry BELOW'}
+    else{call='HOLD';reason='Insufficient confirmation for safe deployment — protecting capital'}
+    modeReason=call!=='HOLD'?'Capital preservation strategy: '+Math.max(strongUp,strongDn)+'/4 category confirmations aligned. '+
+      'Trend, oscillators, momentum'+(Math.max(strongUp,strongDn)>=4?', and order flow all':'')+ ' in agreement. '+
+      (regimePenalty<1?'Regime penalty applied ('+ind.regime.replace('_',' ')+') — still cleared threshold.':'Clean regime for entry.')+
+      ' High-probability, low-risk setup.':
+      'Capital preservation mode requires 3+ aligned signal categories and score threshold of '+sThresh.toFixed(1)+'. '+
+      'Currently: '+(Math.max(strongUp,strongDn))+' aligned categories, raw score '+Math.abs(sScore).toFixed(1)+'. '+
+      (regimePenalty<1?'Regime ('+ind.regime.replace('_',' ')+') adding caution. ':'')+'Patience is the edge here.'
+
+  }else{
+    // BALANCED: Standard quant — weights all factors equally, median risk
+    var bThresh=2.3;
+    modeConf=rawConf;
+    modePriceBias=traj?traj.slope*1.2:0;
+    if(score>=bThresh){call='ABOVE';reason='Bullish confluence confirmed — BET ABOVE STRIKE'}
+    else if(score<=-bThresh){call='BELOW';reason='Bearish confluence confirmed — BET BELOW STRIKE'}
+    else{call='HOLD';reason='Insufficient edge — standing aside this round'}
+    modeReason=call!=='HOLD'?'Balanced quant approach: weighting trend, oscillators, momentum, volatility, flow, trajectory, and divergence equally. '+
+      'Score '+Math.abs(score).toFixed(1)+' exceeds threshold '+bThresh+'. '+
+      'Regime: '+ind.regime.replace('_',' ')+'. Optimal risk/reward ratio for deployment.':
+      'Balanced analysis shows score '+Math.abs(score).toFixed(1)+' vs threshold '+bThresh+'. '+
+      'Signal not yet strong enough across categories. Watching for convergence.'
+  }
+
+  // Price projection per mode
+  var projPrice=traj?traj.proj+modePriceBias:null;
+
+  return{call:call,conf:modeConf,reason:reason,score:score,signals:signals,modeReason:modeReason,projPrice:projPrice,rawConf:rawConf}
 }
 
-/* ======== GENIE TEXT — ELITE CRYPTO INTELLIGENCE ======== */
+/* ======== GENIE TEXT — QUANTITATIVE CRYPTO & PREDICTION MARKET AI ======== */
 function genieText(){
   if(!S.price||!S.ind){
-    if(S.hist.length<26)return'Collecting market data... '+S.hist.length+'/26 samples for full analysis. GENIE is standing by.';
+    if(S.hist.length<26)return'Collecting market data... '+S.hist.length+'/26 samples for full analysis. GENIE quantitative engine standing by.';
     return'Processing multi-indicator analysis...'
   }
-  var p=S.price,ind=S.ind,a=S.analysis,kal=S.kal;
+  var p=S.price,ind=S.ind,a=S.analysis,kal=S.kal,mode=S.mode;
   var strike=kal.open||Math.round(p/500)*500;
   var diff=p-strike,side=diff>=0?'above':'below';
   var pts=[];
 
+  // Mode identity header
+  if(mode==='aggressive')pts.push('[AGGRESSIVE MODE] Momentum-capture strategy active.');
+  else if(mode==='safe')pts.push('[SAFE MODE] Capital preservation protocol engaged.');
+  else pts.push('[BALANCED MODE] Standard quantitative analysis.');
+
   pts.push('BTC at '+fmt$(p)+', '+fmt$(Math.abs(diff),0)+' '+side+' the '+fmt$(strike,0)+' strike.');
 
-  // Trend
+  // Trend — mode-adapted analysis
   if(ind.e9&&ind.e21){
     var bull=ind.e9>ind.e21,sp=Math.abs((ind.e9-ind.e21)/ind.e21*100);
-    if(sp>0.04)pts.push((bull?'Bullish':'Bearish')+' trend \u2014 EMA 9 '+(bull?'above':'below')+' 21 by '+sp.toFixed(3)+'%.');
-    else pts.push('EMAs converging \u2014 trend indecisive, watching for breakout.');
+    if(mode==='aggressive'){
+      if(sp>0.02)pts.push((bull?'Bullish':'Bearish')+' EMA structure ('+sp.toFixed(3)+'% spread) — '+(bull?'momentum favors continuation':'selling pressure dominant')+'. Actionable signal.');
+      else pts.push('EMA spread tight at '+sp.toFixed(3)+'% — breakout imminent. Watching for directional catalyst.');
+    }else if(mode==='safe'){
+      if(sp>0.06)pts.push((bull?'Confirmed bullish':'Confirmed bearish')+' trend with '+sp.toFixed(3)+'% EMA spread. Minimum threshold met for safe entry.');
+      else pts.push('EMA spread insufficient ('+sp.toFixed(3)+'%) for safe mode entry. Need >0.06% for trend confirmation.');
+    }else{
+      if(sp>0.04)pts.push((bull?'Bullish':'Bearish')+' trend — EMA 9 '+(bull?'above':'below')+' 21 by '+sp.toFixed(3)+'%.');
+      else pts.push('EMAs converging — trend indecisive, watching for breakout.');
+    }
   }
 
-  // RSI
+  // RSI — mode-adapted interpretation
   if(ind.r14!==null){
-    if(ind.r14>70)pts.push('RSI '+ind.r14.toFixed(0)+' \u2014 overbought, reversal risk.');
-    else if(ind.r14>55)pts.push('RSI healthy at '+ind.r14.toFixed(0)+' \u2014 buying momentum intact.');
-    else if(ind.r14>45)pts.push('RSI neutral at '+ind.r14.toFixed(0)+' \u2014 no clear directional bias.');
-    else if(ind.r14>30)pts.push('RSI weak at '+ind.r14.toFixed(0)+' \u2014 selling pressure building.');
-    else pts.push('RSI '+ind.r14.toFixed(0)+' \u2014 deeply oversold, bounce potential.');
+    if(mode==='aggressive'){
+      if(ind.r14>65)pts.push('RSI '+ind.r14.toFixed(0)+' — strong buying momentum, riding the wave.');
+      else if(ind.r14<35)pts.push('RSI '+ind.r14.toFixed(0)+' — oversold bounce setup, contrarian opportunity.');
+      else pts.push('RSI '+ind.r14.toFixed(0)+' — within range, waiting for directional break.');
+    }else if(mode==='safe'){
+      if(ind.r14>70)pts.push('RSI '+ind.r14.toFixed(0)+' — overbought. Safe mode: elevated reversal risk, reducing conviction.');
+      else if(ind.r14<30)pts.push('RSI '+ind.r14.toFixed(0)+' — deeply oversold. Caution: falling knives in safe mode.');
+      else if(ind.r14>55)pts.push('RSI healthy at '+ind.r14.toFixed(0)+' — safe zone for longs.');
+      else if(ind.r14<45)pts.push('RSI weak at '+ind.r14.toFixed(0)+' — safe zone for shorts.');
+      else pts.push('RSI neutral at '+ind.r14.toFixed(0)+' — insufficient directional conviction for safe mode.');
+    }else{
+      if(ind.r14>70)pts.push('RSI '+ind.r14.toFixed(0)+' — overbought, reversal risk.');
+      else if(ind.r14>55)pts.push('RSI healthy at '+ind.r14.toFixed(0)+' — buying momentum intact.');
+      else if(ind.r14>45)pts.push('RSI neutral at '+ind.r14.toFixed(0)+' — no clear directional bias.');
+      else if(ind.r14>30)pts.push('RSI weak at '+ind.r14.toFixed(0)+' — selling pressure building.');
+      else pts.push('RSI '+ind.r14.toFixed(0)+' — deeply oversold, bounce potential.');
+    }
   }
 
   // MACD
   if(ind.mc){
-    if(ind.mc.crossUp)pts.push('MACD just crossed bullish \u2014 fresh momentum signal.');
-    else if(ind.mc.crossDown)pts.push('MACD crossed bearish \u2014 momentum shifting to sellers.');
-    else if(ind.mc.hist>0)pts.push('MACD histogram positive'+(Math.abs(ind.mc.hist)>1?' and expanding':'')+' \u2014 bulls in control.');
-    else pts.push('MACD histogram negative \u2014 bears have the edge.');
+    if(ind.mc.crossUp)pts.push('MACD bullish crossover'+(mode==='aggressive'?' — high-priority entry signal.':mode==='safe'?' — need additional confirmation before acting.':' — fresh momentum signal.'));
+    else if(ind.mc.crossDown)pts.push('MACD bearish crossover'+(mode==='aggressive'?' — reversing position bias immediately.':mode==='safe'?' — increasing defensive posture.':' — momentum shifting to sellers.'));
+    else if(ind.mc.hist>0)pts.push('MACD histogram positive — bulls in control.');
+    else pts.push('MACD histogram negative — bears have the edge.');
   }
 
-  // Order flow
+  // Order flow — mode matters
   var imb=S.ob.imb;
-  if(Math.abs(imb)>0.08)pts.push('Order book '+(imb>0?'bid':'ask')+'-heavy at '+Math.abs(imb*100).toFixed(0)+'% \u2014 '+(imb>0?'institutional buying':'sell-side pressure')+'.');
+  if(Math.abs(imb)>0.08){
+    if(mode==='aggressive')pts.push('Order book '+(imb>0?'bid':'ask')+'-heavy at '+Math.abs(imb*100).toFixed(0)+'% — '+(imb>0?'aggressive buying pressure, front-running institutional flow':'heavy sell walls, shorting the weakness')+'.');
+    else if(mode==='safe')pts.push('Order book '+(imb>0?'bid':'ask')+'-heavy at '+Math.abs(imb*100).toFixed(0)+'% — '+(imb>0?'institutional support provides downside floor':'sell pressure warrants caution')+'.');
+    else pts.push('Order book '+(imb>0?'bid':'ask')+'-heavy at '+Math.abs(imb*100).toFixed(0)+'% — '+(imb>0?'institutional buying':'sell-side pressure')+'.');
+  }
 
-  // Regime
-  pts.push('Market regime: '+ind.regime.replace('_',' ')+' \u2014 '+(ind.regime==='trending_up'?'ride the trend':ind.regime==='trending_down'?'follow the sell-off':ind.regime==='compression'?'breakout imminent, stay alert':ind.regime==='volatile'?'choppy conditions, reduce exposure':'waiting for directional clarity')+'.');
+  // Regime — mode-specific reaction
+  var regTxt=ind.regime.replace('_',' ');
+  if(mode==='aggressive'){
+    pts.push('Regime: '+regTxt+' — '+(ind.regime==='trending_up'?'perfect for momentum plays, maximizing exposure':ind.regime==='trending_down'?'shorting into weakness, tracking sell-side flow':ind.regime==='compression'?'pre-breakout compression detected, positioning for explosive move':ind.regime==='volatile'?'volatility = opportunity, widening targets':'monitoring for regime shift trigger')+'.');
+  }else if(mode==='safe'){
+    pts.push('Regime: '+regTxt+' — '+(ind.regime==='trending_up'?'safe to follow established trend':ind.regime==='trending_down'?'safe to follow established downtrend':ind.regime==='compression'?'WARNING: direction uncertain, safe mode defers entry':ind.regime==='volatile'?'CAUTION: elevated risk, safe mode reduces position sizing':'insufficient regime clarity for safe deployment')+'.');
+  }else{
+    pts.push('Regime: '+regTxt+' — '+(ind.regime==='trending_up'?'ride the trend':ind.regime==='trending_down'?'follow the sell-off':ind.regime==='compression'?'breakout imminent, stay alert':ind.regime==='volatile'?'choppy conditions, reduce exposure':'waiting for directional clarity')+'.');
+  }
 
-  // Trajectory
-  if(S.traj){var pSide=S.traj.proj>strike?'above':'below';pts.push('Projected close: '+fmt$(S.traj.proj,0)+' ('+pSide+' strike, '+S.traj.conf.toFixed(0)+'% fit).')}
+  // Trajectory + projected price
+  if(S.traj&&a&&a.projPrice){
+    var pSide=a.projPrice>strike?'above':'below';
+    pts.push('Projected close: '+fmt$(a.projPrice,0)+' ('+pSide+' strike, '+S.traj.conf.toFixed(0)+'% model fit).');
+  }
 
   // Final call
   if(a){
-    if(a.call==='ABOVE')pts.push('GENIE verdict: firm ABOVE at '+a.conf+'% confidence. High-edge setup.');
-    else if(a.call==='BELOW')pts.push('GENIE verdict: firm BELOW at '+a.conf+'% confidence. Clear bearish structure.');
-    else pts.push('GENIE verdict: standing aside \u2014 signals not aligned for a confident play.');
+    if(a.call==='ABOVE')pts.push('GENIE verdict: firm ABOVE at '+a.conf+'% confidence.'+(mode==='aggressive'?' Deploy now.':mode==='safe'?' High-conviction confirmed.':' High-edge setup.'));
+    else if(a.call==='BELOW')pts.push('GENIE verdict: firm BELOW at '+a.conf+'% confidence.'+(mode==='aggressive'?' Deploy now.':mode==='safe'?' All safety checks passed.':' Clear bearish structure.'));
+    else pts.push('GENIE verdict: HOLD — '+(mode==='aggressive'?'even aggressive mode sees no quantifiable edge here.':mode==='safe'?'insufficient multi-category confirmation for safe deployment.':'signals not aligned for a confident play.'));
   }
 
   return pts.join(' ')
 }
 
-/* ======== BET SIZING (Kelly Criterion) ======== */
-function betSize(bank,conf,mode){
-  if(!bank||bank<=0||conf<=0)return{amt:0,frac:0,note:''};
-  var p=0.5+(conf/100)*0.32; // map confidence to 50-82% win probability estimate
+/* ======== BET SIZING — MODE-ADAPTIVE KELLY CRITERION ======== */
+function betSize(bank,conf,mode,call){
+  if(!bank||bank<=0||conf<=0)return{amt:0,frac:0,note:'',edge:0};
+  var p=0.5+(conf/100)*0.32;
   var edge=2*p-1;
-  if(edge<=0)return{amt:0,frac:0,note:'Edge negative \u2014 no bet recommended'};
-  var mult=mode==='aggressive'?0.9:mode==='safe'?0.2:0.45; // Kelly fractions
+  if(edge<=0)return{amt:0,frac:0,note:'Edge negative \u2014 no bet',edge:0};
+
+  var mult,label,note;
+  if(mode==='aggressive'){
+    // Full Kelly — max edge extraction, accept higher variance
+    mult=0.9;label='Full Kelly';
+    note=label+' \u00B7 '+(p*100).toFixed(0)+'% win est. \u00B7 Max edge extraction';
+  }else if(mode==='safe'){
+    // Quarter Kelly — capital preservation, smooth equity curve
+    mult=0.2;label='Quarter Kelly';
+    note=label+' \u00B7 '+(p*100).toFixed(0)+'% win est. \u00B7 Capital preservation';
+    // Safe mode refuses to bet on HOLD signals
+    if(call==='HOLD')return{amt:0,frac:0,note:'Safe mode: no bet on HOLD signals',edge:edge}
+  }else{
+    // Half Kelly — balanced risk/reward
+    mult=0.45;label='Half Kelly';
+    note=label+' \u00B7 '+(p*100).toFixed(0)+'% win est. \u00B7 Optimal risk-adjusted';
+  }
+
   var frac=edge*mult;
   var amt=Math.round(bank*frac);
   amt=clamp(amt,0,bank);
-  var label=mode==='aggressive'?'Full Kelly':'safe'===mode?'Quarter Kelly':'Half Kelly';
-  return{amt:amt,frac:(frac*100).toFixed(1),note:label+' \u00B7 '+(p*100).toFixed(0)+'% est. win rate'}
+  return{amt:amt,frac:(frac*100).toFixed(1),note:note,edge:edge}
 }
 
-/* ======== AUTO-LOCK (patient, diligent) ======== */
+/* ======== AUTO-LOCK (patient, diligent — only at extreme conviction) ======== */
 function updateLock(){
   if(!S.analysis||S.lockDir)return;
   var dir=S.analysis.call==='ABOVE'?'UP':S.analysis.call==='BELOW'?'DOWN':null;
-  if(!dir||S.analysis.conf<45){S.lockSamples=[];return}
-  S.lockSamples=S.lockSamples.slice(-11).concat([{dir:dir,conf:S.analysis.conf}]);
-  if(S.lockSamples.length<10)return; // patience: need 10 samples
+  if(!dir||S.analysis.conf<50){S.lockSamples=[];return}
+  S.lockSamples=S.lockSamples.slice(-14).concat([{dir:dir,conf:S.analysis.conf}]);
+  if(S.lockSamples.length<12)return; // extreme patience: need 12 samples
 
   var ups=0,dns=0;
   for(var i=0;i<S.lockSamples.length;i++){if(S.lockSamples[i].dir==='UP')ups++;else dns++}
@@ -673,10 +804,24 @@ function updateLock(){
   for(var i=0;i<S.lockSamples.length;i++){if(S.lockSamples[i].dir===maj){sum+=S.lockSamples[i].conf;cnt++}}
   var avgC=cnt>0?sum/cnt:0;
 
-  // Only lock when highly confident, consistent, and during valid entry window
-  if(ratio>=0.9&&avgC>=65&&(S.kal.phase==='early'||S.kal.phase==='mid')){
+  // Only lock when HIGHLY confident: 95% consistency + 75% avg confidence + valid entry window
+  if(ratio>=0.95&&avgC>=75&&(S.kal.phase==='early'||S.kal.phase==='mid')){
     S.lockDir=maj;S.lockConf=Math.round(avgC);S.lockTime=ts()
   }
+}
+
+/* ======== LOCK STATUS (for display inside signal card) ======== */
+function lockStatus(){
+  if(S.lockDir)return{state:'locked',dir:S.lockDir,conf:S.lockConf,time:S.lockTime};
+  if(!S.analysis||S.analysis.call==='HOLD')return{state:'idle'};
+  var n=S.lockSamples.length;
+  if(n<3)return{state:'idle'};
+  // Count consistency
+  var ups=0,dns=0;
+  for(var i=0;i<n;i++){if(S.lockSamples[i].dir==='UP')ups++;else dns++}
+  var ratio=Math.max(ups,dns)/n;
+  var maj=ups>=dns?'UP':'DOWN';
+  return{state:'building',samples:n,needed:12,ratio:Math.round(ratio*100),dir:maj}
 }
 
 /* ======== RENDER ======== */
@@ -726,17 +871,30 @@ function render(){
     $('sigSub').textContent='Collecting data... '+S.hist.length+'/26 samples needed';
   }
 
-  // Lock
+  // Lock inner status (inside signal card)
+  var ls=lockStatus();
+  var li=$('lockInner');
+  if(ls.state==='locked'){
+    li.className='lock-inner active locked-'+(ls.dir==='UP'?'up':'dn');
+    li.innerHTML='\uD83D\uDD12 AUTO-LOCKED: '+ls.dir+' \u2014 '+ls.conf+'% avg conviction \u2014 Holding firm since '+ls.time
+  }else if(ls.state==='building'){
+    li.className='lock-inner active building';
+    li.innerHTML='\u23F3 AUTO-LOCK: Building conviction \u2014 '+ls.samples+'/'+ls.needed+' samples \u00B7 '+ls.ratio+'% consistency \u00B7 Direction: '+ls.dir
+  }else{
+    li.className='lock-inner';li.innerHTML=''
+  }
+
+  // Lock banner (full-width, only at extreme confidence)
   var lb=$('lockBnr');
   if(S.lockDir){
     lb.className='lock active '+(S.lockDir==='UP'?'up':'dn');
     lb.textContent='\uD83D\uDD12 LOCKED: '+S.lockDir+' \u2014 '+S.lockConf+'% avg confidence \u2014 Holding firm ('+S.lockTime+')'
   }else{lb.className='lock'}
 
-  // Bet sizing
+  // Bet sizing — mode-adaptive
   var bank=parseFloat(($('inBank')||{}).value)||0;
   var conf=a?a.conf:0;
-  var bs=betSize(bank,conf,S.mode);
+  var bs=betSize(bank,conf,S.mode,a?a.call:'HOLD');
   if(bank>0&&conf>0){
     $('betAmt').textContent=fmt$(bs.amt,0);
     $('betAmt').style.color=a&&a.call==='ABOVE'?CL.g:a&&a.call==='BELOW'?CL.r:CL.b;
@@ -744,6 +902,23 @@ function render(){
   }else{
     $('betAmt').textContent='$--';$('betAmt').style.color=CL.b;
     $('betNote').textContent=bank<=0?'Enter bankroll for AI bet sizing':'Waiting for signal...'
+  }
+
+  // Mode AI Decision section
+  var mh=$('modeAIHdr'),mc=$('modeAICall'),mw=$('modeAIWhy');
+  if(S.mode==='aggressive')mh.textContent='\uD83D\uDD25 AGGRESSIVE ANALYSIS';
+  else if(S.mode==='safe')mh.textContent='\uD83D\uDEE1\uFE0F SAFE ANALYSIS';
+  else mh.textContent='\u2696\uFE0F BALANCED ANALYSIS';
+  if(a){
+    var cTxt=a.call==='ABOVE'?'BET ABOVE \u2191':a.call==='BELOW'?'BET BELOW \u2193':'NO BET \u2014 HOLD';
+    mc.textContent=cTxt;
+    mc.style.color=a.call==='ABOVE'?CL.g:a.call==='BELOW'?CL.r:CL.o;
+    var why=a.modeReason||'';
+    if(a.projPrice)why+=' Projected: '+fmt$(a.projPrice,0)+'.';
+    mw.textContent=why
+  }else{
+    mc.textContent='ANALYZING';mc.style.color=CL.t3;
+    mw.textContent='Collecting data for '+S.mode+' mode quantitative analysis...'
   }
 
   // GENIE text
