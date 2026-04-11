@@ -2524,11 +2524,12 @@ function render(){
 }
 
 /* ======== DATA FETCHING — COMPOSITE PRICE (Coinbase + Kraken avg for Kalshi parity) ======== */
-var _priceSources={coinbase:null,kraken:null};
+var _priceSources={coinbase:null,kraken:null,binance:null};
 function updateCompositePrice(){
   var vals=[];
   if(_priceSources.coinbase)vals.push(_priceSources.coinbase);
   if(_priceSources.kraken)vals.push(_priceSources.kraken);
+  if(_priceSources.binance)vals.push(_priceSources.binance);
   if(vals.length===0)return;
   var sum=0;for(var i=0;i<vals.length;i++)sum+=vals[i];
   var avg=sum/vals.length;
@@ -2542,7 +2543,10 @@ function fetchSpot(){
   var p2=cfg.krakenPair?fetch('https://api.kraken.com/0/public/Ticker?pair='+cfg.krakenPair).then(function(r){return r.json()}).then(function(d){
     if(gen!==_fetchGen)return;if(d&&d.result){var k=d.result[cfg.krakenKey]||d.result[cfg.krakenPair];if(k){var a=parseFloat(k.c[0]);if(isFinite(a))_priceSources.kraken=a}}
   }).catch(function(){}):Promise.resolve();
-  return Promise.all([p1,p2]).then(function(){if(gen===_fetchGen)updateCompositePrice()})
+  var p3=fetch(cfg.binanceBase+'/ticker/price?symbol='+cfg.binancePair).then(function(r){return r.json()}).then(function(d){
+    if(gen!==_fetchGen)return;var a=parseFloat(d&&d.price);if(isFinite(a))_priceSources.binance=a;
+  }).catch(function(){});
+  return Promise.all([p1,p2,p3]).then(function(){if(gen===_fetchGen)updateCompositePrice()})
 }
 function fetch24h(){
   var gen=_fetchGen,cfg=getCfg();
@@ -2765,7 +2769,7 @@ function switchCoin(sym){
     var nk=Object.keys(fresh);for(var i=0;i<nk.length;i++)S[nk[i]]=fresh[nk[i]];
   }
   // Reset price sources
-  _priceSources={coinbase:null,kraken:null};
+  _priceSources={coinbase:null,kraken:null,binance:null};
   S._chartDirty=true;
   // Update UI
   updateTabUI();updateLabels();setupChart();
