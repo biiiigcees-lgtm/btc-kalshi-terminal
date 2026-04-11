@@ -75,6 +75,7 @@ body{
 .hdr-t{font-size:10px;font-weight:700;letter-spacing:.16em;color:var(--t3)}
 .dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;transition:all .3s}
 .dot.on{background:var(--g);box-shadow:0 0 10px var(--g),0 0 20px rgba(0,232,123,0.25);animation:pulse 2s ease-in-out infinite}
+.dot.stale{background:var(--y);box-shadow:0 0 8px rgba(255,193,7,0.3);animation:pulse 1s ease-in-out infinite}
 .dot.off{background:var(--r);box-shadow:0 0 8px rgba(255,59,92,0.3)}
 .hdr-time{font-size:10px;color:var(--t4);font-variant-numeric:tabular-nums;font-weight:500}
 
@@ -627,7 +628,7 @@ function makeDefaultState(){return{
   _lastBetAmt:0
 }}
 var S = makeDefaultState();
-var ws=null, wsRT=null;
+var ws=null, wsRT=null, _wsBackoff=3000;
 
 /* ======== HELPERS ======== */
 function $(id){return document.getElementById(id)}
@@ -644,6 +645,8 @@ function setMode(m){
   for(var i=0;i<btns.length;i++){btns[i].className='mode-btn'+(btns[i].getAttribute('data-m')===m?' active':'');}
   var prof=RISK_PROFILES[m];
   if(prof&&$('modeDesc'))$('modeDesc').textContent=prof.desc;
+  // Recalc EV safety margin for new mode immediately
+  S.ev.safetyMargin=(RISK_PROFILES[m]||RISK_PROFILES.balanced).edgeThresh;
   // Changing mode forces a fresh decision for this round
   S.roundDecision=null;S.roundDecisionPrice=null;
 }
@@ -942,8 +945,12 @@ function checkConfluence(trendS,oscS,momS,volS,flowS,htfS,mode){
   // Mode-adaptive requirement
   C.required=mode==='safe'?4:mode==='aggressive'?2:3;
   var pass=dominant>=C.required;
-  // Additional: reject if classes are split (some bull, some bear with conviction)
-  var conflicted=bullish>=2&&bearish>=2;
+  // Additional: reject if classes are split — mode-adaptive conflict threshold
+  // Aggressive: only conflict if BOTH sides pass aggressive's own threshold (2)
+  // Safe: conflict at 2+/2+ (strict), Balanced: 2+/2+
+  var conflictMin=mode==='aggressive'?3:2;
+  var conflicted=bullish>=conflictMin&&bearish>=conflictMin;
+  C.conflicted=conflicted;
   if(conflicted)pass=false;
   return{pass:pass,aligned:dominant,total:total,direction:bullish>=bearish?1:-1,conflicted:conflicted,agreement:C.agreement}
 }
@@ -1023,7 +1030,10 @@ function dseUpdate(rawScore,rawConf,rawCall,modeThresh){
   D.totalTicks++;
 
   // 1. SCORE SMOOTHING — dual EMA: slow for state, fast for reactivity check
-  var alphaS=0.12; // slow — governs committed state
+  // Regime-adaptive alpha: faster in trends (catch breakouts), slower in compression (reduce noise)
+  var curRegime=S.ind?S.ind.regime:'unknown';
+  var alphaS=curRegime==='trending_up'||curRegime==='trending_down'?0.18:
+             curRegime==='compression'?0.08:curRegime==='volatile'?0.10:0.12;
   D.scoreEMA=D.scoreEMA*(1-alphaS)+rawScore*alphaS;
 
   // 2. ROLLING VARIANCE — measures noise level in recent scores
@@ -1259,9 +1269,11 @@ function analyze(opts){
   signals.push({name:'Bollinger',val:ind.bl?(ind.bl.pctB*100).toFixed(0)+'% B':'WAIT',type:volScore>0.2?'up':volScore<-0.2?'dn':'neu'});
   score+=clamp(volScore,-1,1)*W.struct;
 
-  // 5. VOLUME/FLOW: Order book imbalance (max ±1)
+  // 5. VOLUME/FLOW: Order book imbalance (max ±1) — decay if OB data stale
   var flowScore=0;
-  if(Math.abs(obImb)>0.05){flowScore=obImb>0?0.6:-0.6}
+  var obAge=Date.now()-(S.ob._ts||0);
+  var obFresh=obAge<2000?1.0:obAge<5000?0.6:0.3;
+  if(Math.abs(obImb)>0.05){flowScore=(obImb>0?0.6:-0.6)*obFresh}
   signals.push({name:'Order Flow',val:flowScore>0.2?'BID HEAVY':flowScore<-0.2?'ASK HEAVY':'BALANCED',type:flowScore>0.2?'up':flowScore<-0.2?'dn':'neu'});
   score+=clamp(flowScore,-1,1)*W.vol;
 
@@ -1817,9 +1829,12 @@ function analyzeTargetPrice(currentPrice,targetPrice,secondsToExpiry,recentPrice
   // ── 13. Kalshi implied probability integration ──────────────────────
   var kalshiBias=0;
   var kalshiEdge=null;
-  if(S.kalshi.impliedProb!==null){
+  if(S.kalshi.impliedProb!==null&&isFinite(S.kalshi.impliedProb)){
     // Kalshi prob is for "ABOVE" outcome. Use it as a Bayesian prior.
-    kalshiBias=(S.kalshi.impliedProb-0.5)*0.4; // gentle nudge toward market consensus
+    // Weight by freshness — reduce influence if data is >10s old
+    var kalshiAge=Date.now()-(S.kalshi._ts||0);
+    var kalshiFresh=kalshiAge<10000?1.0:kalshiAge<30000?0.6:0.3;
+    kalshiBias=(S.kalshi.impliedProb-0.5)*0.4*kalshiFresh;
   }
 
   // ── 14. VWAP bias ──────────────────────────────────────────────────
@@ -1926,7 +1941,7 @@ function analyzeTargetPrice(currentPrice,targetPrice,secondsToExpiry,recentPrice
   }
 
   // 7. Kalshi market edge (if available)
-  if(S.kalshi.impliedProb!==null){
+  if(S.kalshi.impliedProb!==null&&isFinite(S.kalshi.impliedProb)){
     var mktProb=direction==='ABOVE'?S.kalshi.impliedProb:(1-S.kalshi.impliedProb);
     var edgeVsMkt=probability-mktProb;
     rationale.push('Kalshi market: '+Math.round(mktProb*100)+'% implied. Model edge: '+(edgeVsMkt>0?'+':'')+Math.round(edgeVsMkt*100)+'pp vs market.');
@@ -1946,7 +1961,7 @@ function analyzeTargetPrice(currentPrice,targetPrice,secondsToExpiry,recentPrice
     probability:Math.round(probability*1000)/1000,
     rationale:rationale,
     confidenceLevel:confidenceLevel,
-    kalshiEdge:S.kalshi.impliedProb!==null?(probability-(direction==='ABOVE'?S.kalshi.impliedProb:(1-S.kalshi.impliedProb))):null
+    kalshiEdge:S.kalshi.impliedProb!==null&&isFinite(S.kalshi.impliedProb)?(probability-(direction==='ABOVE'?S.kalshi.impliedProb:(1-S.kalshi.impliedProb))):null
   }
 }
 
@@ -2152,7 +2167,7 @@ function lockStatus(){
 function render(){
   var p=S.price,ind=S.ind,kal=S.kal,a=S.analysis,ob=S.ob;
 
-  $('dot').className='dot '+(S.connected||S.price?'on':'off');
+  $('dot').className='dot '+((S.connected||S.price)?(_priceTs&&Date.now()-_priceTs>10000?'stale':'on'):'off');
   $('clock').textContent=ts();
 
   // Price
@@ -2530,6 +2545,7 @@ function render(){
 
 /* ======== DATA FETCHING — COMPOSITE PRICE (Coinbase + Kraken avg for Kalshi parity) ======== */
 var _priceSources={coinbase:null,kraken:null,binance:null};
+var _priceTs=0; // timestamp of last successful composite price update
 function updateCompositePrice(){
   var vals=[];
   if(_priceSources.coinbase)vals.push(_priceSources.coinbase);
@@ -2539,6 +2555,7 @@ function updateCompositePrice(){
   var sum=0;for(var i=0;i<vals.length;i++)sum+=vals[i];
   var avg=sum/vals.length;
   S.price=avg;S.hist=S.hist.slice(-(HIST_MAX-1)).concat([avg]);S._chartDirty=true;
+  _priceTs=Date.now();
 }
 function fetchSpot(){
   var gen=_fetchGen,cfg=getCfg();
@@ -2568,7 +2585,7 @@ function fetchOB(){
     var asks=(d.asks||[]).map(function(a){return{pr:parseFloat(a[0]),sz:parseFloat(a[1])}});
     var bids=(d.bids||[]).map(function(b){return{pr:parseFloat(b[0]),sz:parseFloat(b[1])}});
     var tb=0,ta=0;for(var i=0;i<bids.length;i++)tb+=bids[i].sz;for(var i=0;i<asks.length;i++)ta+=asks[i].sz;
-    var tot=tb+ta;S.ob={asks:asks,bids:bids,imb:tot>0?(tb-ta)/tot:0}
+    var tot=tb+ta;S.ob={asks:asks,bids:bids,imb:tot>0?(tb-ta)/tot:0,_ts:Date.now()}
   }).catch(function(){})
 }
 function fetchKlines(){
@@ -2620,6 +2637,7 @@ function fetchKalshiMarket(){
       S.kalshi.last=(best.last_price||0)/100;
       S.kalshi.impliedProb=S.kalshi.last||((S.kalshi.bid+S.kalshi.ask)/2)||null;
       S.kalshi.volume=best.volume||0;
+      S.kalshi._ts=Date.now();
     }
   }).catch(function(){})
 }
@@ -2630,7 +2648,7 @@ function connectWS(){
   if(ws&&ws.readyState===WebSocket.OPEN)return;
   try{
     ws=new WebSocket('wss://ws-feed.exchange.coinbase.com');
-    ws.onopen=function(){ws.send(JSON.stringify({type:'subscribe',channels:[{name:'ticker',product_ids:[cfg.wsProductId]}]}));S.connected=true};
+    ws.onopen=function(){ws.send(JSON.stringify({type:'subscribe',channels:[{name:'ticker',product_ids:[cfg.wsProductId]}]}));S.connected=true;_wsBackoff=3000};
     ws.onmessage=function(e){
       try{var m=JSON.parse(e.data);
         if(m.type==='ticker'&&m.product_id===getCfg().wsProductId){
@@ -2642,7 +2660,7 @@ function connectWS(){
       }catch(x){}
     };
     ws.onerror=function(){};
-    ws.onclose=function(){S.connected=false;wsRT=setTimeout(connectWS,3000)}
+    ws.onclose=function(){S.connected=false;wsRT=setTimeout(connectWS,_wsBackoff);_wsBackoff=Math.min(_wsBackoff*1.5,30000)}
   }catch(x){S.connected=false}
 }
 
@@ -2723,7 +2741,7 @@ function stopPolling(){
 function startAllPolling(){
   stopPolling();
   _intervals.push(setInterval(fetch24h,12000));
-  _intervals.push(setInterval(fetchOB,2500));
+  _intervals.push(setInterval(fetchOB,1500));
   _intervals.push(setInterval(fetchKlines15m,120000));
   _intervals.push(setInterval(fetchFundingRate,60000));
   _intervals.push(setInterval(fetchKalshiMarket,15000));
@@ -2732,7 +2750,8 @@ function startAllPolling(){
   _intervals.push(setInterval(saveState,5000));
   _intervals.push(setInterval(function(){
     if(!ws||ws.readyState!==WebSocket.OPEN){
-      fetchSpot().then(function(){S.connected=true}).catch(function(){S.connected=false})
+      var gen=_fetchGen;
+      fetchSpot().then(function(){if(gen===_fetchGen)S.connected=true}).catch(function(){if(gen===_fetchGen)S.connected=false})
     }
   },2000));
 }
@@ -2759,6 +2778,7 @@ function switchCoin(sym){
   // Close WS
   if(ws){ws.onclose=null;ws.close();ws=null}
   if(wsRT){clearTimeout(wsRT);wsRT=null}
+  _wsBackoff=3000; // reset WS backoff on coin switch
   // Stop all intervals
   stopPolling();
   // Switch active coin
@@ -2775,6 +2795,7 @@ function switchCoin(sym){
   }
   // Reset price sources
   _priceSources={coinbase:null,kraken:null,binance:null};
+  _priceTs=0;
   S._chartDirty=true;
   // Update UI
   updateTabUI();updateLabels();setupChart();
@@ -2786,6 +2807,15 @@ function switchCoin(sym){
   }).catch(function(){
     connectWS();startAllPolling();
     fetchFundingRate();fetchKalshiMarket();
+    // Retry klines if history empty (critical for indicators)
+    if(S.hist.length<26){
+      var retryGen=_fetchGen;
+      var retryId=setInterval(function(){
+        if(retryGen!==_fetchGen){clearInterval(retryId);return}
+        fetchKlines().then(function(){if(S.hist.length>=26)clearInterval(retryId)});
+      },3000);
+      _intervals.push(retryId);
+    }
   });
 }
 
