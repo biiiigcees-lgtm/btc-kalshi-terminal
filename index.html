@@ -213,6 +213,16 @@ body{
 .bet-conv{margin-top:10px;display:flex;gap:5px;justify-content:center;align-items:center}
 .bet-conv-dot{width:9px;height:9px;border-radius:50%;background:rgba(40,55,80,0.5);transition:all .4s ease;border:1px solid transparent}
 .bet-conv-lbl{font-size:7px;font-weight:600;letter-spacing:.1em;color:var(--t4);margin-left:8px}
+.bet-rationale{margin-top:8px;text-align:left;padding:0 4px}
+.bet-rationale .rd-bullet{font-size:8px;color:var(--t3);line-height:1.7;font-weight:400}
+.bet-market-warn{margin-top:8px;padding:6px 10px;border-radius:6px;font-size:8px;font-weight:600;letter-spacing:.04em;background:rgba(255,170,0,0.08);border:1px solid rgba(255,170,0,0.2);color:var(--o)}
+.reeval-btn{
+  margin-top:10px;padding:7px 16px;border:1px solid rgba(86,212,245,0.2);background:rgba(86,212,245,0.06);
+  color:var(--b);border-radius:16px;font-size:8px;font-weight:700;letter-spacing:.1em;
+  cursor:pointer;transition:all .3s;font-family:inherit
+}
+.reeval-btn:hover{background:rgba(86,212,245,0.12);border-color:rgba(86,212,245,0.35)}
+.rd-locked-tag{display:inline-block;font-size:7px;font-weight:700;letter-spacing:.1em;padding:2px 8px;border-radius:4px;margin-left:8px}
 
 /* Lock Inner (inside signal card) */
 .lock-inner{
@@ -394,11 +404,14 @@ body{
     </div>
   </div>
   <div class="bet-sug" id="betSug">
-    <div class="bet-lbl">GENIE SUGGESTS</div>
+    <div class="bet-lbl">ROUND DECISION</div>
     <div class="bet-dir" id="betDir">WAITING FOR DATA</div>
     <div class="bet-amt" id="betAmt">$--</div>
     <div class="bet-note" id="betNote">Set bankroll to receive AI bet sizing</div>
     <div class="bet-conv" id="betConv"></div>
+    <div class="bet-rationale" id="betRationale"></div>
+    <div class="bet-market-warn" id="betMarketWarn" style="display:none"></div>
+    <button class="reeval-btn" id="reevalBtn" onclick="forceReeval()" style="display:none">&#x1F504; RE-EVALUATE &amp; OVERRIDE</button>
   </div>
   <div class="tgt-analysis" id="tgtAnalysis" style="display:none">
     <div class="stl">TARGET PRICE ANALYSIS</div>
@@ -527,7 +540,10 @@ var S = {
   // Kalshi market data
   kalshi:{bid:null,ask:null,last:null,impliedProb:null,volume:0},
   // Round outcome tracking
-  _roundCall:null, _roundConf:0, _roundIsBet:false, _roundSignals:null, _roundPrice:null
+  _roundCall:null, _roundConf:0, _roundIsBet:false, _roundSignals:null, _roundPrice:null,
+  // Round Decision — one assertive decision per 15-min round
+  roundDecision:null, // {roundId, style, direction, probability, edge, timestamp, confidenceLevel, rationale, priceAtDecision, noTrade}
+  roundDecisionPrice:null // price when decision was made — for market-moved warning
 };
 var ws=null, wsRT=null;
 
@@ -546,6 +562,15 @@ function setMode(m){
   for(var i=0;i<btns.length;i++){btns[i].className='mode-btn'+(btns[i].getAttribute('data-m')===m?' active':'');}
   var prof=RISK_PROFILES[m];
   if(prof&&$('modeDesc'))$('modeDesc').textContent=prof.desc;
+  // Changing mode forces a fresh decision for this round
+  S.roundDecision=null;S.roundDecisionPrice=null;
+}
+
+/* ======== FORCE RE-EVALUATE — user-initiated override ======== */
+function forceReeval(){
+  if(!S.analysis||!S.price)return;
+  var rd=getDecision(S.mode,{analysis:S.analysis,price:S.price},true);
+  render(); // immediately re-render with new decision
 }
 
 /* ======== INDICATORS ======== */
@@ -812,7 +837,7 @@ function calcEV(conf,mode){
   p=clamp(p,0.50,0.82); // never claim >82% edge on a binary
   var edge=2*p-1;
   var ev=edge*p-(1-p)*(1-edge);
-  var margin=mode==='aggressive'?0.06:mode==='safe'?0.12:0.08;
+  var margin=(RISK_PROFILES[mode]||RISK_PROFILES.balanced).edgeThresh;
   S.ev.edge=edge;S.ev.ev=ev;
   S.ev.evHistory.push({ev:ev,edge:edge,t:Date.now()});
   if(S.ev.evHistory.length>40)S.ev.evHistory.shift();
@@ -1839,10 +1864,11 @@ function analyzeTargetPrice(currentPrice,targetPrice,secondsToExpiry,recentPrice
 
 /* ======== RISK PROFILES — Central config for all betting styles ======== */
 var RISK_PROFILES={
-  safe:      {kellyMult:0.15, edgeThresh:0.12, maxPct:0.08, ddLimit:0.10, label:'Eighth Kelly',  desc:'Capital preservation first. Only bets on high-confidence signals with wide safety margins. Ideal for protecting bankroll during choppy or uncertain markets.'},
-  balanced:  {kellyMult:0.35, edgeThresh:0.08, maxPct:0.15, ddLimit:0.15, label:'Third Kelly',   desc:'Moderate stakes with disciplined edge thresholds. Balances growth and risk for steady, consistent returns across market conditions.'},
-  aggressive:{kellyMult:0.70, edgeThresh:0.06, maxPct:0.25, ddLimit:0.20, label:'Fractional Kelly',desc:'Maximum EV extraction. Larger positions on lower-threshold edges. Higher variance — designed for experienced traders comfortable with drawdowns.'}
+  safe:      {kellyMult:0.15, edgeThresh:0.08, maxPct:0.08, ddLimit:0.10, label:'Eighth Kelly',  desc:'Capital preservation first. Only bets on high-confidence signals with wide safety margins. Ideal for protecting bankroll during choppy or uncertain markets.'},
+  balanced:  {kellyMult:0.35, edgeThresh:0.05, maxPct:0.15, ddLimit:0.15, label:'Third Kelly',   desc:'Moderate stakes with disciplined edge thresholds. Balances growth and risk for steady, consistent returns across market conditions.'},
+  aggressive:{kellyMult:0.70, edgeThresh:0.02, maxPct:0.25, ddLimit:0.20, label:'Fractional Kelly',desc:'Maximum EV extraction. Larger positions on lower-threshold edges. Higher variance \u2014 designed for experienced traders comfortable with drawdowns.'}
 };
+var HYSTERESIS_MARGIN=0.10; // 10 percentage points required to flip direction across rounds
 
 /**
  * Pure position sizing function — config-driven, no side effects.
@@ -1862,6 +1888,102 @@ function getPositionSize(style,bankroll,edge,fullKelly){
   var size=Math.round(bankroll*frac);
   size=clamp(size,0,bankroll);
   return{enabled:true,sizeInDollars:size,sizeAsPct:+(frac*100).toFixed(2),label:prof.label,reason:'OK'}
+}
+
+/* ======== ROUND DECISION — One assertive call per 15-min round ======== */
+/**
+ * Compute a round-locked decision. Once stored, direction is stable for the round.
+ * @param {string} style  'safe'|'balanced'|'aggressive'
+ * @param {object} inputs {analysis, price, conf, edge, probability, strike, kal}
+ * @param {boolean} forceOverride  If true, re-evaluate even if decision exists
+ * @returns {object} RoundDecision
+ */
+function getDecision(style,inputs,forceOverride){
+  var prof=RISK_PROFILES[style]||RISK_PROFILES.balanced;
+  var a=inputs.analysis;
+  var now=Date.now();
+  // Compute round ID from 15-min wall-clock window
+  var roundId=Math.floor(now/900000);
+
+  // If we already have a decision for this round + style, and not forcing override, return it
+  if(S.roundDecision&&S.roundDecision.roundId===roundId&&S.roundDecision.style===style&&!forceOverride){
+    return S.roundDecision;
+  }
+
+  // No analysis yet — can't decide
+  if(!a||!inputs.price){
+    return{roundId:roundId,style:style,direction:'noTrade',probability:0.5,edge:0,
+      timestamp:now,confidenceLevel:'low',rationale:['Insufficient data to make a decision.'],
+      priceAtDecision:inputs.price||0,noTrade:true}
+  }
+
+  // Compute probability and edge using Platt-scaled logistic (same as calcEV)
+  var z=(a.conf-50)*0.06;
+  var p=1/(1+Math.exp(-z));
+  p=clamp(p,0.50,0.82);
+  var edge=2*p-1;
+  // Direction from analysis
+  var rawDir=a.call; // 'ABOVE' or 'BELOW'
+  var probForDir=rawDir==='ABOVE'?p:(1-p);
+
+  // Apply hysteresis: if previous round decision exists, require large margin to flip
+  var prev=S.roundDecision;
+  if(prev&&prev.roundId===roundId-1&&prev.direction!=='noTrade'&&!forceOverride){
+    var prevDir=prev.direction; // 'YES' (ABOVE) or 'NO' (BELOW)
+    var newDirYes=rawDir==='ABOVE'?'YES':'NO';
+    if(prevDir!==newDirYes){
+      // Only flip if margin exceeds hysteresis
+      var probYes=rawDir==='ABOVE'?p:(1-p);
+      var probNo=1-probYes;
+      var gap=Math.abs(probYes-probNo);
+      if(gap<HYSTERESIS_MARGIN){
+        // Keep previous direction
+        rawDir=prevDir==='YES'?'ABOVE':'BELOW';
+        probForDir=prevDir==='YES'?p:(1-p);
+      }
+    }
+  }
+
+  // Check edge threshold for this style
+  if(edge<prof.edgeThresh){
+    var noTradeRationale=['Edge ('+edge.toFixed(3)+') below '+style+' threshold ('+prof.edgeThresh+').'];
+    if(style==='safe')noTradeRationale.push('Safe mode requires strong setups — standing aside.');
+    else if(style==='balanced')noTradeRationale.push('Edge too thin for balanced sizing — watching.');
+    else noTradeRationale.push('Edge below minimum even for aggressive — no trade.');
+    noTradeRationale.push('Confidence: '+a.conf+'% | Regime: '+(S.ind?S.ind.regime:'unknown'));
+    var noTradeDec={roundId:roundId,style:style,direction:'noTrade',probability:probForDir,edge:edge,
+      timestamp:now,confidenceLevel:'low',rationale:noTradeRationale,
+      priceAtDecision:inputs.price,noTrade:true};
+    S.roundDecision=noTradeDec;
+    S.roundDecisionPrice=inputs.price;
+    return noTradeDec;
+  }
+
+  // Build rationale bullets
+  var direction=rawDir==='ABOVE'?'YES':'NO';
+  var confLevel=a.conf>=70?'high':a.conf>=45?'medium':'low';
+  var rationale=[];
+  rationale.push('Direction: '+(direction==='YES'?'ABOVE':'BELOW')+' strike — '+a.conf+'% model confidence.');
+  rationale.push('Edge: '+edge.toFixed(3)+' (threshold: '+prof.edgeThresh+') — '+prof.label+' sizing.');
+  if(a.dse)rationale.push('DSE: P(above)='+a.dse.probAbove.toFixed(2)+', entropy='+a.dse.entropy.toFixed(2)+', '+a.dse.ticksInState+' ticks in state.');
+  if(S.ind&&S.ind.regime)rationale.push('Regime: '+S.ind.regime.replace('_',' ')+' — urgency '+Math.round((a.urgency||1)*100)+'%.');
+  if(a.sr&&a.sr.nearest)rationale.push('Key level: '+a.sr.nearest.type+' at '+fmt$(a.sr.nearest.price,0)+' ('+a.sr.nearest.touches+'x tested).');
+  if(S.fundingRate)rationale.push('Funding: '+(S.fundingRate>0?'+':'')+S.fundingRate.toFixed(4)+'% — '+(S.fundingRate>0?'longs paying shorts':'shorts paying longs')+'.');
+
+  var dec={roundId:roundId,style:style,direction:direction,probability:probForDir,edge:edge,
+    timestamp:now,confidenceLevel:confLevel,rationale:rationale,
+    priceAtDecision:inputs.price,noTrade:false};
+  S.roundDecision=dec;
+  S.roundDecisionPrice=inputs.price;
+  return dec;
+}
+
+/** Check if market has moved significantly since decision was locked */
+function checkMarketMoved(){
+  if(!S.roundDecision||S.roundDecision.noTrade||!S.price||!S.roundDecisionPrice)return null;
+  var pctMove=Math.abs(S.price-S.roundDecisionPrice)/S.roundDecisionPrice;
+  if(pctMove>0.003)return{moved:true,pct:(pctMove*100).toFixed(2),price:S.roundDecisionPrice}; // >0.3% move
+  return null;
 }
 
 /* ======== BET SIZING — MODE-ADAPTIVE KELLY CRITERION ======== */
@@ -2044,32 +2166,76 @@ function render(){
     S.betStableCount=Math.max(0,S.betStableCount-1)
   }
 
-  // Bet sizing — conviction-scaled, mode-adaptive
+  // Bet sizing — round-decision-locked, mode-adaptive
   var bank=parseFloat(($('inBank')||{}).value)||0;
   var conf=a?a.conf:0;
+  var dirEl=$('betDir'),convEl=$('betConv');
+  var tgt=a&&a.projPrice?fmt$(a.projPrice,0):(p?fmt$(p,0):'---');
+
+  // Get or retrieve locked round decision
+  var rd=getDecision(S.mode,{analysis:a,price:p});
   var bs=betSize(bank,conf,S.mode,a?a.call:null);
   var convMult=[0,0.15,0.35,0.6,0.85,1.0][Math.min(S.betConviction,5)];
   var dispAmt=Math.round(bs.amt*convMult);
-  var dirEl=$('betDir'),convEl=$('betConv');
-  // Bet direction label — above/below target
-  var tgt=a&&a.projPrice?fmt$(a.projPrice,0):(p?fmt$(p,0):'---');
-  var showBet=a&&a.isBet&&S.betConviction>=1;
-  if(bank>0&&curDir&&showBet){
+
+  // Use the locked round decision direction (not raw analysis which may flip)
+  var lockedDir=rd&&!rd.noTrade?(rd.direction==='YES'?'ABOVE':'BELOW'):null;
+  var showBet=rd&&!rd.noTrade&&bank>0&&S.betConviction>=1&&bs.amt>0;
+
+  if(showBet&&lockedDir){
     $('betAmt').textContent=fmt$(dispAmt,0);
-    $('betAmt').style.color=curDir==='ABOVE'?CL.g:CL.r;
-    dirEl.textContent=(curDir==='ABOVE'?'\u25B2 ABOVE ':'\u25BC BELOW ')+tgt;
-    dirEl.style.color=curDir==='ABOVE'?CL.g:CL.r;
+    $('betAmt').style.color=lockedDir==='ABOVE'?CL.g:CL.r;
+    var lockTag=' \u2022 LOCKED';
+    dirEl.textContent=(lockedDir==='ABOVE'?'\u25B2 ABOVE ':'\u25BC BELOW ')+tgt+lockTag;
+    dirEl.style.color=lockedDir==='ABOVE'?CL.g:CL.r;
     var convLabels=['','Forming thesis...','Building position...','Growing confidence','Strong conviction','Maximum conviction \u2014 full deploy'];
-    $('betNote').textContent=bs.note+' \u2014 '+convLabels[S.betConviction]
+    $('betNote').textContent=bs.note+' \u2014 '+convLabels[S.betConviction];
+    $('reevalBtn').style.display='';
+  }else if(rd&&rd.noTrade&&bank>0){
+    $('betAmt').textContent='$--';$('betAmt').style.color=CL.t3;
+    dirEl.textContent='NO TRADE THIS ROUND';dirEl.style.color=CL.o;
+    $('betNote').textContent=rd.rationale?rd.rationale[0]:'Edge below threshold \u2014 standing aside';
+    $('reevalBtn').style.display='';
   }else if(bank>0&&curDir){
     $('betAmt').textContent='$--';$('betAmt').style.color=CL.o;
-    dirEl.textContent='LEAN '+(curDir==='ABOVE'?'\u25B2 ABOVE':'\u25BC BELOW')+' '+tgt+' \u2014 not yet a bet';dirEl.style.color=CL.t3;
-    $('betNote').textContent='Confidence too low for bet \u2014 watching for stronger signal'
+    dirEl.textContent='LEAN '+(curDir==='ABOVE'?'\u25B2 ABOVE':'\u25BC BELOW')+' '+tgt+' \u2014 awaiting lock';dirEl.style.color=CL.t3;
+    $('betNote').textContent='Building conviction before committing to round decision';
+    $('reevalBtn').style.display='none';
   }else{
     $('betAmt').textContent='$--';$('betAmt').style.color=CL.b;
     dirEl.textContent='';
-    $('betNote').textContent=bank<=0?'Enter bankroll for AI bet sizing':'Waiting for signal...'
+    $('betNote').textContent=bank<=0?'Enter bankroll for AI bet sizing':'Waiting for signal...';
+    $('reevalBtn').style.display='none';
   }
+
+  // Rationale bullets from round decision
+  var ratEl=$('betRationale');
+  if(rd&&rd.rationale&&rd.rationale.length>0&&!rd.noTrade){
+    var rhtml='';
+    for(var ri=0;ri<rd.rationale.length;ri++){
+      rhtml+='<div class="rd-bullet">\u2022 '+escH(rd.rationale[ri])+'</div>';
+    }
+    ratEl.innerHTML=rhtml;
+  }else if(rd&&rd.noTrade&&rd.rationale){
+    var rhtml='';
+    for(var ri=0;ri<rd.rationale.length;ri++){
+      rhtml+='<div class="rd-bullet">\u2022 '+escH(rd.rationale[ri])+'</div>';
+    }
+    ratEl.innerHTML=rhtml;
+  }else{
+    ratEl.innerHTML='';
+  }
+
+  // Market-moved warning
+  var mmWarn=checkMarketMoved();
+  var mmEl=$('betMarketWarn');
+  if(mmWarn){
+    mmEl.style.display='';
+    mmEl.textContent='\u26A0\uFE0F Market moved '+mmWarn.pct+'% since decision was locked (from '+fmt$(mmWarn.price,0)+'). Consider re-evaluating manually.';
+  }else{
+    mmEl.style.display='none';
+  }
+
   // Conviction dots
   var dotHTML='';
   for(var di=0;di<5;di++){
@@ -2381,6 +2547,8 @@ function updateTimer(){
     }
     S.kal.open=S.price;S.kal.wPrices=[];S.lockDir=null;S.lockConf=0;S.lockTime=null;S.lockSamples=[];
     S._roundCall=null;S._roundConf=0;S._roundIsBet=false;S._roundSignals=null;S._roundPrice=null;
+    // Clear round decision for fresh round
+    S.roundDecision=null;S.roundDecisionPrice=null;
   }
   if(!S.kal.open&&S.price)S.kal.open=S.price;
   S.kal.tl=tl;S.kal.phase=phase;
