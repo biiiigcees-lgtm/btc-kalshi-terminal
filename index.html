@@ -358,7 +358,19 @@ body{
 .tr-kelly-lbl{font-size:6px;font-weight:600;letter-spacing:.14em;color:var(--t4);margin-bottom:2px}
 .tr-kelly-val{font-size:12px;font-weight:800;font-variant-numeric:tabular-nums}
 .tr-kelly-amt{font-size:8px;color:var(--t3);margin-top:1px}
-.tr-reasoning{font-size:8px;color:var(--t3);line-height:1.7;font-weight:400;border-top:1px solid rgba(60,80,120,0.1);padding-top:8px}
+.tr-reasoning{font-size:9px;color:var(--t2);line-height:1.7;font-weight:400;border-top:1px solid rgba(60,80,120,0.1);padding-top:8px}
+
+/* === DUAL PANEL — Signal + Decision side by side === */
+.dual-panel{
+  display:grid;grid-template-columns:1fr 1fr;gap:8px;
+  margin:8px 12px;
+}
+.dual-panel .sig{margin:0}
+.dual-panel .right-panel{
+  display:flex;flex-direction:column;gap:8px;
+}
+.dual-panel .bet-sug{margin-top:0}
+.dual-panel .trade-rec{margin-top:0}
 
 /* === COIN TABS === */
 .coin-tabs{
@@ -398,6 +410,7 @@ body{
   .conf-pct{font-size:28px}
   .pos-grid{grid-template-columns:1fr 1fr;gap:8px}
   .session-stats{grid-template-columns:repeat(2,1fr)}
+  .dual-panel{grid-template-columns:1fr}
   .ftr{font-size:7px;padding:8px}
 }
 </style>
@@ -442,6 +455,7 @@ body{
   <div class="tm-row"><span class="tm-phase" id="tmPhase">--</span><span class="tm-strike" id="tmStrike">Strike: --</span></div>
 </div>
 
+<div class="dual-panel">
 <div class="sig scanning" id="sigCard">
   <div class="sig-lbl">GENIE AI — ELITE SIGNAL ENGINE</div>
   <div class="sig-dir" id="sigDir">ANALYZING</div>
@@ -449,6 +463,35 @@ body{
   <div class="conf-row"><span class="conf-lbl">CONFIDENCE</span><span class="conf-pct" id="confPct">--%</span></div>
   <div class="conf-trk"><div class="conf-fill" id="confFill" style="width:0%"></div></div>
   <div class="lock-inner" id="lockInner"></div>
+</div>
+
+<div class="right-panel">
+  <div class="bet-sug" id="betSug">
+    <div class="bet-lbl">ROUND DECISION</div>
+    <div class="bet-dir" id="betDir">WAITING FOR DATA</div>
+    <div class="bet-amt" id="betAmt">$--</div>
+    <div class="bet-note" id="betNote">Set bankroll to receive AI bet sizing</div>
+    <div class="bet-conv" id="betConv"></div>
+    <div class="bet-rationale" id="betRationale"></div>
+    <div class="bet-market-warn" id="betMarketWarn" style="display:none"></div>
+  </div>
+  <div class="trade-rec hold-rec" id="tradeRec">
+    <div class="tr-header">
+      <div class="tr-decision hold" id="trDecision">HOLD</div>
+      <div class="tr-confidence" id="trConfidence">--</div>
+    </div>
+    <div class="tr-grid">
+      <div class="tr-cell"><div class="tr-cell-lbl">MAX PRICE TO PAY</div><div class="tr-cell-val" id="trLimit">--</div></div>
+      <div class="tr-cell"><div class="tr-cell-lbl">CURRENT MARKET</div><div class="tr-cell-val" id="trMarket">--</div></div>
+    </div>
+    <div class="tr-kelly">
+      <div class="tr-kelly-item"><div class="tr-kelly-lbl">BIG BET</div><div class="tr-kelly-val" id="trKFull">--</div><div class="tr-kelly-amt" id="trKFullAmt"></div></div>
+      <div class="tr-kelly-item" style="background:rgba(0,232,123,0.06)"><div class="tr-kelly-lbl">SAFER BET ✓</div><div class="tr-kelly-val" id="trKHalf">--</div><div class="tr-kelly-amt" id="trKHalfAmt"></div></div>
+      <div class="tr-kelly-item"><div class="tr-kelly-lbl">SMALL BET</div><div class="tr-kelly-val" id="trKQtr">--</div><div class="tr-kelly-amt" id="trKQtrAmt"></div></div>
+    </div>
+    <div class="tr-reasoning" id="trReasoning">Waiting for market data...</div>
+  </div>
+</div>
 </div>
 
 <div class="lock" id="lockBnr"></div>
@@ -465,31 +508,6 @@ body{
     <button class="mode-btn" data-m="aggressive" onclick="setMode('aggressive')">&#x1F525; AGGRESSIVE</button>
   </div>
   <div class="mode-desc" id="modeDesc">Moderate stakes with disciplined edge thresholds. Balances growth and risk for steady, consistent returns across market conditions.</div>
-  <div class="bet-sug" id="betSug">
-    <div class="bet-lbl">ROUND DECISION</div>
-    <div class="bet-dir" id="betDir">WAITING FOR DATA</div>
-    <div class="bet-amt" id="betAmt">$--</div>
-    <div class="bet-note" id="betNote">Set bankroll to receive AI bet sizing</div>
-    <div class="bet-conv" id="betConv"></div>
-    <div class="bet-rationale" id="betRationale"></div>
-    <div class="bet-market-warn" id="betMarketWarn" style="display:none"></div>
-  </div>
-  <div class="trade-rec hold-rec" id="tradeRec">
-    <div class="tr-header">
-      <div class="tr-decision hold" id="trDecision">HOLD</div>
-      <div class="tr-confidence" id="trConfidence">--</div>
-    </div>
-    <div class="tr-grid">
-      <div class="tr-cell"><div class="tr-cell-lbl">LIMIT PRICE</div><div class="tr-cell-val" id="trLimit">--</div></div>
-      <div class="tr-cell"><div class="tr-cell-lbl">MARKET PRICE</div><div class="tr-cell-val" id="trMarket">--</div></div>
-    </div>
-    <div class="tr-kelly">
-      <div class="tr-kelly-item"><div class="tr-kelly-lbl">FULL KELLY</div><div class="tr-kelly-val" id="trKFull">--</div><div class="tr-kelly-amt" id="trKFullAmt"></div></div>
-      <div class="tr-kelly-item" style="background:rgba(0,232,123,0.06)"><div class="tr-kelly-lbl">HALF KELLY ✓</div><div class="tr-kelly-val" id="trKHalf">--</div><div class="tr-kelly-amt" id="trKHalfAmt"></div></div>
-      <div class="tr-kelly-item"><div class="tr-kelly-lbl">QUARTER KELLY</div><div class="tr-kelly-val" id="trKQtr">--</div><div class="tr-kelly-amt" id="trKQtrAmt"></div></div>
-    </div>
-    <div class="tr-reasoning" id="trReasoning">Waiting for market data...</div>
-  </div>
   <div class="session-stats" id="sessionStats">
     <div class="ss-item"><div class="ss-label">SESSION P&amp;L</div><div class="ss-val" id="ssPnl">$0</div></div>
     <div class="ss-item"><div class="ss-label">WIN RATE</div><div class="ss-val" id="ssWinRate">--%</div></div>
@@ -2205,7 +2223,7 @@ function getBettingRecommendation(analysis,mode,bankroll){
   if(edge<=0||edge<prof.edgeThresh){
     result.decision='Hold';
     result.confidence=Math.round(clamp((1-Math.abs(edge)*10)*30,5,40));
-    result.reasoning='Edge '+(edge*100).toFixed(1)+'pp '+(edge<=0?'negative':'below '+mode+' threshold of '+(prof.edgeThresh*100).toFixed(0)+'pp')+'. No bet.';
+    result.reasoning=edge<=0?'The price looks fair right now — no clear bargain to buy.':'The edge is only '+(edge*100).toFixed(1)+'¢, which isn\'t enough for '+mode+' mode (needs '+(prof.edgeThresh*100).toFixed(0)+'¢+). Sit this one out.';
     return result;
   }
 
@@ -2265,12 +2283,16 @@ function getBettingRecommendation(analysis,mode,bankroll){
     }
   }
 
-  // --- Reasoning ---
+  // --- Reasoning (plain English) ---
   var reasons=[];
-  reasons.push(result.decision+' '+direction+' at '+(effectiveCost*100).toFixed(0)+'¢ — model sees '+(probForDir*100).toFixed(0)+'% true probability, +'+(edge*100).toFixed(1)+'pp edge.');
-  if(hasKalshi)reasons.push('Kalshi: '+Math.round(kalBid*100)+'/'+Math.round(kalAsk*100)+' ('+Math.round(spread*100)+'¢ spread'+(S.kalshi.volume?', '+S.kalshi.volume+' vol':'')+').');
-  if(result.confidence<50)reasons.push('Low confidence — reduce size or pass.');
-  else if(spread>0.08)reasons.push('Wide spread — use limit order for price improvement.');
+  if(result.decision==='Buy'){
+    reasons.push('The market is selling this at '+(effectiveCost*100).toFixed(0)+'¢, but we think it should be '+(probForDir*100).toFixed(0)+'¢ — that\'s a '+(edge*100).toFixed(1)+'¢ discount.');
+  }else{
+    reasons.push('We can sell this at '+(effectiveCost*100).toFixed(0)+'¢, but we think it\'s only worth '+(probForDir*100).toFixed(0)+'¢ — that\'s '+(edge*100).toFixed(1)+'¢ of profit baked in.');
+  }
+  if(hasKalshi)reasons.push('Market spread: '+Math.round(kalBid*100)+'¢ to '+Math.round(kalAsk*100)+'¢'+(spread>0.08?' (wide — use a limit order to save money).':'.'));
+  if(result.confidence<50)reasons.push('Confidence is low — keep the bet small or skip this one.');
+  else if(result.confidence>=75)reasons.push('High confidence setup.');
   result.reasoning=reasons.join(' ');
 
   return result;
@@ -2534,9 +2556,9 @@ function render(){
     var rec=getBettingRecommendation(a,S.mode,bank);
     trEl.className='trade-rec '+(rec.decision==='Buy'?'buy-rec':rec.decision==='Sell'?'sell-rec':'hold-rec');
     var decEl=$('trDecision');
-    decEl.textContent=rec.decision==='Buy'?'\u25B2 BUY '+(a.call||''):rec.decision==='Sell'?'\u25BC SELL YES':'HOLD';
+    decEl.textContent=rec.decision==='Buy'?'BUY — price looks cheap':rec.decision==='Sell'?'SELL — price looks expensive':'HOLD — no clear edge';
     decEl.className='tr-decision '+(rec.decision==='Buy'?'buy':rec.decision==='Sell'?'sell':'hold');
-    $('trConfidence').textContent='Confidence: '+rec.confidence+'%';
+    $('trConfidence').textContent='How sure: '+rec.confidence+'%';
     $('trLimit').textContent=rec.limitPrice!==null?(rec.limitPrice*100).toFixed(0)+'\u00a2':'--';
     $('trLimit').style.color=rec.decision==='Buy'?CL.g:rec.decision==='Sell'?CL.r:CL.t3;
     $('trMarket').textContent=rec.marketPrice!==null?(rec.marketPrice*100).toFixed(0)+'\u00a2':'N/A';
