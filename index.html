@@ -322,6 +322,16 @@ body{
   .conf-pct{font-size:34px}
   .p-big{font-size:36px}
 }
+
+/* === SESSION STATS === */
+.session-stats{margin-top:14px;display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.ss-item{padding:10px 8px;border-radius:var(--radius-sm);text-align:center;background:rgba(12,18,32,0.45);border:1px solid rgba(60,80,120,0.1)}
+.ss-label{font-size:7px;font-weight:600;letter-spacing:.12em;color:var(--t4);margin-bottom:3px}
+.ss-val{font-size:14px;font-weight:800;font-variant-numeric:tabular-nums}
+
+/* === STAND ASIDE === */
+.bet-sug.stand-aside{border-color:rgba(255,183,64,0.25);background:rgba(255,183,64,0.04)}
+.bet-sug.stand-aside .bet-amt{font-size:18px}
 </style>
 </head>
 <body>
@@ -379,6 +389,21 @@ body{
     <button class="mode-btn" data-m="aggressive" onclick="setMode('aggressive')">&#x1F525; AGGRESSIVE</button>
   </div>
   <div class="mode-desc" id="modeDesc">Moderate stakes with disciplined edge thresholds. Balances growth and risk for steady, consistent returns across market conditions.</div>
+  <div class="bet-sug" id="betSug">
+    <div class="bet-lbl">ROUND DECISION</div>
+    <div class="bet-dir" id="betDir">WAITING FOR DATA</div>
+    <div class="bet-amt" id="betAmt">$--</div>
+    <div class="bet-note" id="betNote">Set bankroll to receive AI bet sizing</div>
+    <div class="bet-conv" id="betConv"></div>
+    <div class="bet-rationale" id="betRationale"></div>
+    <div class="bet-market-warn" id="betMarketWarn" style="display:none"></div>
+  </div>
+  <div class="session-stats" id="sessionStats">
+    <div class="ss-item"><div class="ss-label">SESSION P&amp;L</div><div class="ss-val" id="ssPnl">$0</div></div>
+    <div class="ss-item"><div class="ss-label">WIN RATE</div><div class="ss-val" id="ssWinRate">--%</div></div>
+    <div class="ss-item"><div class="ss-label">BETS</div><div class="ss-val" id="ssBets">0</div></div>
+    <div class="ss-item"><div class="ss-label">DRAWDOWN</div><div class="ss-val" id="ssDd">0%</div></div>
+  </div>
   <div class="mode-decisions" id="modeDecisions">
     <div class="mode-card" id="mcSafe">
       <div class="mc-hdr">🛡️ SAFE</div>
@@ -398,15 +423,6 @@ body{
       <div class="mc-conf" id="mcAggressiveConf"></div>
       <div class="mc-why" id="mcAggressiveWhy"></div>
     </div>
-  </div>
-  <div class="bet-sug" id="betSug">
-    <div class="bet-lbl">ROUND DECISION</div>
-    <div class="bet-dir" id="betDir">WAITING FOR DATA</div>
-    <div class="bet-amt" id="betAmt">$--</div>
-    <div class="bet-note" id="betNote">Set bankroll to receive AI bet sizing</div>
-    <div class="bet-conv" id="betConv"></div>
-    <div class="bet-rationale" id="betRationale"></div>
-    <div class="bet-market-warn" id="betMarketWarn" style="display:none"></div>
   </div>
   <div class="tgt-analysis" id="tgtAnalysis" style="display:none">
     <div class="stl">TARGET PRICE ANALYSIS</div>
@@ -451,7 +467,7 @@ body{
   <div id="obDiv"><div style="text-align:center;font-size:10px;color:var(--t4)">Loading...</div></div>
 </div>
 
-<div class="ftr">Live data · Composite Price (Coinbase + Kraken) · Funding Rate · Kalshi Market · GENIE v5.0</div>
+<div class="ftr">Live data · Composite Price (Coinbase + Kraken) · Funding Rate · Kalshi Market · GENIE v5.3</div>
 </div>
 
 <script>
@@ -524,7 +540,9 @@ var S = {
     ddLimit:0.15,         // hard drawdown limit (15% default, mode-adaptive)
     throttle:1.0,         // risk throttle multiplier (reduces sizing during DD)
     totalPnL:0,           // running P&L tracking
-    sessionBets:0         // bets this session
+    sessionBets:0,        // bets this session
+    sessionWins:0,        // wins this session
+    sessionLosses:0       // losses this session
   },
   _lhp:0, _lktl:900, _chartDirty:true,
   _startTs:Date.now(),
@@ -537,8 +555,10 @@ var S = {
   // Round outcome tracking
   _roundCall:null, _roundConf:0, _roundIsBet:false, _roundSignals:null, _roundPrice:null,
   // Round Decision — one assertive decision per 15-min round
-  roundDecision:null, // {roundId, style, direction, probability, edge, timestamp, confidenceLevel, rationale, priceAtDecision, noTrade}
-  roundDecisionPrice:null // price when decision was made — for market-moved warning
+  roundDecision:null,
+  roundDecisionPrice:null,
+  _reevalCooldown:0,
+  _lastBetAmt:0
 };
 var ws=null, wsRT=null;
 
@@ -832,10 +852,6 @@ function calcEV(conf,mode){
   var edge=2*p-1;
   var ev=edge*p-(1-p)*(1-edge);
   var margin=(RISK_PROFILES[mode]||RISK_PROFILES.balanced).edgeThresh;
-  S.ev.edge=edge;S.ev.ev=ev;
-  S.ev.evHistory.push({ev:ev,edge:edge,t:Date.now()});
-  if(S.ev.evHistory.length>40)S.ev.evHistory.shift();
-  S.ev.safetyMargin=margin;
   return{p:p,edge:edge,ev:ev,viable:edge>margin&&ev>0}
 }
 
@@ -1334,9 +1350,9 @@ function analyze(opts){
       var aScore=score*(1+Math.abs(ind.mom)*2);
       mConf=clamp(Math.round((Math.abs(aScore)/maxS)*105),0,98);
       mCall=aScore>=0?'ABOVE':'BELOW';
-      mBet=Math.abs(aScore)>=1.8&&cflPass&&evM.viable&&PD.failStreak<3;
-      mReason=mBet?'Momentum-capture: '+cfl.aligned+' classes. EV='+evM.ev.toFixed(3)+'. Regime: '+regime.replace('_',' ')+'.'+htfNote:
-        'Lean '+mCall+' but edge insufficient (score '+Math.abs(aScore).toFixed(1)+'/1.8, confluence '+cfl.aligned+'/'+cflReq+').'+htfNote;
+      mBet=cflPass&&evM.viable&&PD.failStreak<3;
+      mReason=mBet?'Momentum-capture: '+cfl.aligned+' classes. Edge='+evM.edge.toFixed(3)+'. Regime: '+regime.replace('_',' ')+'.'+htfNote:
+        'Lean '+mCall+(evM.viable?'':', edge below threshold')+(cflPass?'':', confluence '+cfl.aligned+'/'+cflReq)+'.'+htfNote;
     }else if(m==='safe'){
       var sScore=score*0.7;
       var regPen=(regime==='volatile'||regime==='compression')?0.35:1.0;
@@ -1349,19 +1365,19 @@ function analyze(opts){
       if(momScore>0.3)sUp++;if(momScore<-0.3)sDn++;
       if(flowScore>0.2)sUp++;if(flowScore<-0.2)sDn++;
       var sMulti=Math.max(sUp,sDn)>=4;
-      mBet=Math.abs(sScore)>=4.2&&sMulti&&cflPass&&evM.viable&&PD.failStreak<3;
-      mReason=mBet?'Capital preservation: '+Math.max(sUp,sDn)+'/4 categories, EV='+evM.ev.toFixed(3)+'.'+htfNote:
-        'Lean '+mCall+' but need 4+ categories (got '+Math.max(sUp,sDn)+'), score '+Math.abs(sScore).toFixed(1)+'/4.2.'+htfNote;
+      mBet=sMulti&&cflPass&&evM.viable&&PD.failStreak<3;
+      mReason=mBet?'Capital preservation: '+Math.max(sUp,sDn)+'/4 categories. Edge='+evM.edge.toFixed(3)+'.'+htfNote:
+        'Lean '+mCall+(evM.viable?'':', edge below threshold')+(sMulti?'':', need 4+ categories (got '+Math.max(sUp,sDn)+')')+(cflPass?'':', confluence '+cfl.aligned+'/'+cflReq)+'.'+htfNote;
     }else{
       mConf=rawConf;
       mCall=score>=0?'ABOVE':'BELOW';
-      mBet=Math.abs(score)>=2.8&&cflPass&&evM.viable&&PD.failStreak<3;
-      mReason=mBet?'Balanced: '+cfl.aligned+' classes. Score '+Math.abs(score).toFixed(1)+'. EV='+evM.ev.toFixed(3)+'. Regime: '+regime.replace('_',' ')+'.'+htfNote:
-        'Lean '+mCall+' but score '+Math.abs(score).toFixed(1)+'/2.8, confluence '+cfl.aligned+'/'+cflReq+'.'+htfNote;
+      mBet=cflPass&&evM.viable&&PD.failStreak<3;
+      mReason=mBet?'Balanced: '+cfl.aligned+' classes. Edge='+evM.edge.toFixed(3)+'. Regime: '+regime.replace('_',' ')+'.'+htfNote:
+        'Lean '+mCall+(evM.viable?'':', edge below threshold')+(cflPass?'':', confluence '+cfl.aligned+'/'+cflReq)+'.'+htfNote;
     }
     // Apply mode minimum confidence gate
     if(mBet&&mConf<mMinConf){mBet=false;mReason='Lean '+mCall+' \u2014 confidence '+mConf+'% below '+m+' minimum ('+mMinConf+'%). Watch only.'}
-    return{call:mCall,conf:mConf,bet:mBet,reason:mReason,minConf:mMinConf}
+    return{call:mCall,conf:mConf,bet:mBet,reason:mReason,minConf:mMinConf,ev:evM}
   }
 
   // Compute decisions for ALL THREE modes
@@ -1373,6 +1389,12 @@ function analyze(opts){
 
   // Active mode's decision
   var activeDecision=allModes[mode];
+  // Update EV state once for active mode only (calcEV is now pure)
+  var activeEV=activeDecision.ev;
+  S.ev.edge=activeEV.edge;S.ev.ev=activeEV.ev;
+  S.ev.safetyMargin=(RISK_PROFILES[mode]||RISK_PROFILES.balanced).edgeThresh;
+  S.ev.evHistory.push({ev:activeEV.ev,edge:activeEV.edge,t:Date.now()});
+  if(S.ev.evHistory.length>40)S.ev.evHistory.shift();
   var call=activeDecision.call;
   var modeConf=activeDecision.conf;
   var reason=activeDecision.bet?(call==='ABOVE'?'ABOVE \u2014 ':'BELOW \u2014 ')+activeDecision.reason:'Lean '+call+' \u2014 '+activeDecision.reason;
@@ -1435,6 +1457,7 @@ function analyze(opts){
   return{call:finalCall,conf:finalConf,reason:finalReason,score:dse.smoothScore,signals:signals,
     modeReason:modeReason,projPrice:projPrice,rawConf:rawConf,isBet:isBet,rawLean:rawLean,
     allModes:allModes,modeMinConf:activeDecision.minConf,modeConflict:modeConflict,urgency:urgency,sr:sr,
+    probability:activeEV.p,edge:activeEV.edge,
     dse:{probAbove:dse.probAbove,probBelow:dse.probBelow,entropy:dse.entropy,variance:dse.variance,flips:dse.flips,ticksInState:dse.ticksInState,locked:dse.locked}}
 }
 
@@ -1858,9 +1881,9 @@ function analyzeTargetPrice(currentPrice,targetPrice,secondsToExpiry,recentPrice
 
 /* ======== RISK PROFILES — Central config for all betting styles ======== */
 var RISK_PROFILES={
-  safe:      {kellyMult:0.15, edgeThresh:0.08, maxPct:0.08, ddLimit:0.10, label:'Eighth Kelly',  desc:'Capital preservation first. Only bets on high-confidence signals with wide safety margins. Ideal for protecting bankroll during choppy or uncertain markets.'},
-  balanced:  {kellyMult:0.35, edgeThresh:0.05, maxPct:0.15, ddLimit:0.15, label:'Third Kelly',   desc:'Moderate stakes with disciplined edge thresholds. Balances growth and risk for steady, consistent returns across market conditions.'},
-  aggressive:{kellyMult:0.70, edgeThresh:0.02, maxPct:0.25, ddLimit:0.20, label:'Fractional Kelly',desc:'Maximum EV extraction. Larger positions on lower-threshold edges. Higher variance \u2014 designed for experienced traders comfortable with drawdowns.'}
+  safe:      {kellyMult:0.15, edgeThresh:0.08, maxPct:0.08, ddLimit:0.10, maxTradeAmt:100, dailyLossLimit:200, label:'Eighth Kelly',  desc:'Capital preservation first. Only bets on high-confidence signals with wide safety margins. Ideal for protecting bankroll during choppy or uncertain markets.'},
+  balanced:  {kellyMult:0.35, edgeThresh:0.05, maxPct:0.15, ddLimit:0.15, maxTradeAmt:250, dailyLossLimit:500, label:'Third Kelly',   desc:'Moderate stakes with disciplined edge thresholds. Balances growth and risk for steady, consistent returns across market conditions.'},
+  aggressive:{kellyMult:0.70, edgeThresh:0.02, maxPct:0.25, ddLimit:0.20, maxTradeAmt:500, dailyLossLimit:1000, label:'Fractional Kelly',desc:'Maximum EV extraction. Larger positions on lower-threshold edges. Higher variance \u2014 designed for experienced traders comfortable with drawdowns.'}
 };
 var HYSTERESIS_MARGIN=0.10; // 10 percentage points required to flip direction across rounds
 
@@ -1911,11 +1934,9 @@ function getDecision(style,inputs,forceOverride){
       priceAtDecision:inputs.price||0,noTrade:true}
   }
 
-  // Compute probability and edge using Platt-scaled logistic (same as calcEV)
-  var z=(a.conf-50)*0.06;
-  var p=1/(1+Math.exp(-z));
-  p=clamp(p,0.50,0.82);
-  var edge=2*p-1;
+  // Use probability and edge from analyze (single source of truth)
+  var p=a.probability||0.5;
+  var edge=a.edge||0;
   // Direction from analysis
   var rawDir=a.call; // 'ABOVE' or 'BELOW'
   var probForDir=rawDir==='ABOVE'?p:(1-p);
@@ -1923,17 +1944,16 @@ function getDecision(style,inputs,forceOverride){
   // Apply hysteresis: if previous round decision exists, require large margin to flip
   var prev=S.roundDecision;
   if(prev&&prev.roundId===roundId-1&&prev.direction!=='noTrade'&&!forceOverride){
-    var prevDir=prev.direction; // 'YES' (ABOVE) or 'NO' (BELOW)
-    var newDirYes=rawDir==='ABOVE'?'YES':'NO';
-    if(prevDir!==newDirYes){
+    var prevDir=prev.direction; // 'ABOVE' or 'BELOW'
+    if(prevDir!==rawDir){
       // Only flip if margin exceeds hysteresis
       var probYes=rawDir==='ABOVE'?p:(1-p);
       var probNo=1-probYes;
       var gap=Math.abs(probYes-probNo);
       if(gap<HYSTERESIS_MARGIN){
         // Keep previous direction
-        rawDir=prevDir==='YES'?'ABOVE':'BELOW';
-        probForDir=prevDir==='YES'?p:(1-p);
+        rawDir=prevDir;
+        probForDir=prevDir==='ABOVE'?p:(1-p);
       }
     }
   }
@@ -1954,10 +1974,10 @@ function getDecision(style,inputs,forceOverride){
   }
 
   // Build rationale bullets
-  var direction=rawDir==='ABOVE'?'YES':'NO';
+  var direction=rawDir; // 'ABOVE' or 'BELOW'
   var confLevel=a.conf>=70?'high':a.conf>=45?'medium':'low';
   var rationale=[];
-  rationale.push('Direction: '+(direction==='YES'?'ABOVE':'BELOW')+' strike — '+a.conf+'% model confidence.');
+  rationale.push('Direction: '+direction+' strike — '+a.conf+'% model confidence.');
   rationale.push('Edge: '+edge.toFixed(3)+' (threshold: '+prof.edgeThresh+') — '+prof.label+' sizing.');
   if(a.dse)rationale.push('DSE: P(above)='+a.dse.probAbove.toFixed(2)+', entropy='+a.dse.entropy.toFixed(2)+', '+a.dse.ticksInState+' ticks in state.');
   if(S.ind&&S.ind.regime)rationale.push('Regime: '+S.ind.regime.replace('_',' ')+' — urgency '+Math.round((a.urgency||1)*100)+'%.');
@@ -1972,13 +1992,17 @@ function getDecision(style,inputs,forceOverride){
   return dec;
 }
 
-/** Auto re-evaluate if market moved enough since decision lock */
+/** Auto re-evaluate if market moved enough since decision lock — debounced */
 function checkAndAutoReeval(){
   if(!S.roundDecision||S.roundDecision.noTrade||!S.price||!S.roundDecisionPrice)return null;
+  var now=Date.now();
+  if(now-S._reevalCooldown<30000)return null; // 30s cooldown between re-evals
   var pctMove=Math.abs(S.price-S.roundDecisionPrice)/S.roundDecisionPrice;
   if(pctMove>0.003){ // >0.3% move triggers auto re-eval
+    S._reevalCooldown=now;
     var oldDir=S.roundDecision.direction;
     forceReeval();
+    S.roundDecisionPrice=S.price; // reset baseline to prevent re-trigger
     var newDir=S.roundDecision.direction;
     var flipped=oldDir!==newDir;
     return{reeval:true,pct:(pctMove*100).toFixed(2),oldPrice:S.roundDecisionPrice,flipped:flipped,oldDir:oldDir,newDir:newDir};
@@ -1987,23 +2011,27 @@ function checkAndAutoReeval(){
 }
 
 /* ======== BET SIZING — MODE-ADAPTIVE KELLY CRITERION ======== */
-function betSize(bank,conf,mode,call){
-  if(!bank||bank<=0||conf<=0)return{amt:0,frac:0,note:'',edge:0};
+function betSize(bank,analysis,mode){
+  if(!bank||bank<=0||!analysis)return{amt:0,frac:0,note:'',edge:0};
   // Risk throttle — drawdown-based automatic sizing reduction
   var throttle=updateRiskThrottle(bank,mode);
-  // Platt-scaled probability (same as calcEV)
-  var z=(conf-50)*0.06;
-  var p=1/(1+Math.exp(-z));
-  p=clamp(p,0.50,0.82);
-  var edge=2*p-1;
+  // Use probability/edge from analyze (single source of truth)
+  var p=analysis.probability||0.5;
+  var edge=analysis.edge||0;
+  var prof=RISK_PROFILES[mode]||RISK_PROFILES.balanced;
   // Use pure getPositionSize for base sizing
   var pos=getPositionSize(mode,bank,edge,edge);
   if(!pos.enabled){
-    if(mode==='safe'&&!call)return{amt:0,frac:0,note:'Safe mode: waiting for signal',edge:edge};
     return{amt:0,frac:0,note:pos.reason+' \u2014 skip',edge:edge}
   }
   // Apply drawdown throttle on top of pure sizing
   var amt=Math.round(pos.sizeInDollars*throttle);
+  // Enforce per-trade cap
+  if(prof.maxTradeAmt&&amt>prof.maxTradeAmt)amt=prof.maxTradeAmt;
+  // Enforce daily loss limit
+  if(prof.dailyLossLimit&&S.risk.totalPnL<=-prof.dailyLossLimit){
+    return{amt:0,frac:0,note:'Daily loss limit reached ($'+prof.dailyLossLimit+') \u2014 session halted',edge:edge}
+  }
   amt=clamp(amt,0,bank);
   var note=pos.label+' \u00B7 '+(p*100).toFixed(0)+'% win est. \u00B7 '+pos.sizeAsPct+'% of bankroll';
   // Append risk context
@@ -2174,15 +2202,17 @@ function render(){
 
   // Get or retrieve locked round decision
   var rd=getDecision(S.mode,{analysis:a,price:p});
-  var bs=betSize(bank,conf,S.mode,a?a.call:null);
+  var bs=betSize(bank,a,S.mode);
   var convMult=[0,0.15,0.35,0.6,0.85,1.0][Math.min(S.betConviction,5)];
   var dispAmt=Math.round(bs.amt*convMult);
+  S._lastBetAmt=dispAmt; // track for outcome P&L
 
   // Use the locked round decision direction (not raw analysis which may flip)
-  var lockedDir=rd&&!rd.noTrade?(rd.direction==='YES'?'ABOVE':'BELOW'):null;
+  var lockedDir=rd&&!rd.noTrade?rd.direction:null;
   var showBet=rd&&!rd.noTrade&&bank>0&&S.betConviction>=1&&bs.amt>0;
 
   if(showBet&&lockedDir){
+    $('betSug').className='bet-sug';
     $('betAmt').textContent=fmt$(dispAmt,0);
     $('betAmt').style.color=lockedDir==='ABOVE'?CL.g:CL.r;
     var lockTag=' \u2022 LOCKED';
@@ -2191,14 +2221,17 @@ function render(){
     var convLabels=['','Forming thesis...','Building position...','Growing confidence','Strong conviction','Maximum conviction \u2014 full deploy'];
     $('betNote').textContent=bs.note+' \u2014 '+convLabels[S.betConviction];
   }else if(rd&&rd.noTrade&&bank>0){
-    $('betAmt').textContent='$--';$('betAmt').style.color=CL.t3;
+    $('betSug').className='bet-sug stand-aside';
+    $('betAmt').textContent='STAND ASIDE';$('betAmt').style.color=CL.o;
     dirEl.textContent='NO TRADE THIS ROUND';dirEl.style.color=CL.o;
     $('betNote').textContent=rd.rationale?rd.rationale[0]:'Edge below threshold \u2014 standing aside';
   }else if(bank>0&&curDir){
+    $('betSug').className='bet-sug';
     $('betAmt').textContent='$--';$('betAmt').style.color=CL.o;
     dirEl.textContent='LEAN '+(curDir==='ABOVE'?'\u25B2 ABOVE':'\u25BC BELOW')+' '+tgt+' \u2014 awaiting lock';dirEl.style.color=CL.t3;
     $('betNote').textContent='Building conviction before committing to round decision';
   }else{
+    $('betSug').className='bet-sug';
     $('betAmt').textContent='$--';$('betAmt').style.color=CL.b;
     dirEl.textContent='';
     $('betNote').textContent=bank<=0?'Enter bankroll for AI bet sizing':'Waiting for signal...';
@@ -2247,6 +2280,16 @@ function render(){
   }
   dotHTML+='<span class="bet-conv-lbl">'+S.betConviction+'/5</span>';
   convEl.innerHTML=dotHTML;
+
+  // Session stats
+  var wr=S.risk.sessionBets>0?Math.round(S.risk.sessionWins/S.risk.sessionBets*100):0;
+  $('ssPnl').textContent=(S.risk.totalPnL>=0?'+':'')+fmt$(S.risk.totalPnL,0);
+  $('ssPnl').style.color=S.risk.totalPnL>=0?CL.g:CL.r;
+  $('ssWinRate').textContent=S.risk.sessionBets>0?wr+'%':'--%';
+  $('ssWinRate').style.color=wr>=50?CL.g:wr>0?CL.r:CL.t3;
+  $('ssBets').textContent=S.risk.sessionBets;
+  $('ssDd').textContent=(S.risk.currentDD*100).toFixed(1)+'%';
+  $('ssDd').style.color=S.risk.currentDD>0.1?CL.r:S.risk.currentDD>0.05?CL.o:CL.t2;
 
   // All 3 mode decisions — show every mode simultaneously
   var modeKeys=['safe','balanced','aggressive'];
@@ -2542,8 +2585,9 @@ function updateTimer(){
       if(wasCorrect){S.pathDep.failStreak=0}else{S.pathDep.failStreak++}
       // Update session P&L tracking
       S.risk.sessionBets++;
+      if(wasCorrect)S.risk.sessionWins++;else S.risk.sessionLosses++;
       if(S._roundIsBet){
-        var pnlAmt=wasCorrect?50:-50; // approximate per-bet P&L
+        var pnlAmt=wasCorrect?S._lastBetAmt:(-S._lastBetAmt);
         S.risk.totalPnL+=pnlAmt;
       }
     }
@@ -2594,8 +2638,33 @@ function startPoll(){
   },2000)
 }
 
+/* ======== STATE PERSISTENCE ======== */
+function saveState(){
+  try{
+    var bank=parseFloat(($('inBank')||{}).value)||0;
+    localStorage.setItem('btcTerminalState',JSON.stringify({
+      mode:S.mode,bankroll:bank,peakBank:S.risk.peakBank,
+      totalPnL:S.risk.totalPnL,sessionBets:S.risk.sessionBets,
+      sessionWins:S.risk.sessionWins,sessionLosses:S.risk.sessionLosses
+    }));
+  }catch(e){}
+}
+function restoreState(){
+  try{
+    var saved=JSON.parse(localStorage.getItem('btcTerminalState')||'{}');
+    if(saved.mode){S.mode=saved.mode;setMode(saved.mode);}
+    if(saved.bankroll&&$('inBank'))$('inBank').value=saved.bankroll;
+    if(saved.peakBank)S.risk.peakBank=saved.peakBank;
+    if(saved.totalPnL)S.risk.totalPnL=saved.totalPnL;
+    if(saved.sessionBets)S.risk.sessionBets=saved.sessionBets;
+    if(saved.sessionWins)S.risk.sessionWins=saved.sessionWins;
+    if(saved.sessionLosses)S.risk.sessionLosses=saved.sessionLosses;
+  }catch(e){}
+}
+
 /* ======== INIT ======== */
 function init(){
+  restoreState();
   setupChart();chartLoop();
   window.addEventListener('resize',function(){setupChart()});
 
@@ -2606,14 +2675,16 @@ function init(){
     fetchFundingRate();setInterval(fetchFundingRate,60000);
     fetchKalshiMarket();setInterval(fetchKalshiMarket,15000);
     setInterval(tick,1000);setInterval(genieTick,4000);
-    tick();setTimeout(genieTick,1500)
+    tick();setTimeout(genieTick,1500);
+    setInterval(saveState,5000)
   }).catch(function(){
     connectWS();startPoll();
     setInterval(fetch24h,12000);setInterval(fetchOB,2500);
     setInterval(fetchKlines15m,120000);
     fetchFundingRate();setInterval(fetchFundingRate,60000);
     fetchKalshiMarket();setInterval(fetchKalshiMarket,15000);
-    setInterval(tick,1000);setInterval(genieTick,4000)
+    setInterval(tick,1000);setInterval(genieTick,4000);
+    setInterval(saveState,5000)
   })
 }
 
