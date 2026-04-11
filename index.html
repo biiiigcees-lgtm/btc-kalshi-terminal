@@ -334,6 +334,32 @@ body{
 .bet-sug.stand-aside{border-color:rgba(255,183,64,0.25);background:rgba(255,183,64,0.04)}
 .bet-sug.stand-aside .bet-amt{font-size:18px}
 
+/* === TRADE RECOMMENDATION PANEL === */
+.trade-rec{
+  margin-top:14px;padding:14px;border-radius:var(--radius-sm);
+  background:rgba(12,18,32,0.6);border:1px solid rgba(60,80,120,0.15);
+  -webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px)
+}
+.trade-rec.buy-rec{border-color:rgba(0,232,123,0.25)}
+.trade-rec.sell-rec{border-color:rgba(255,59,92,0.25)}
+.trade-rec.hold-rec{border-color:rgba(255,193,7,0.25)}
+.tr-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.tr-decision{font-size:13px;font-weight:900;letter-spacing:.12em}
+.tr-decision.buy{color:var(--g)}
+.tr-decision.sell{color:var(--r)}
+.tr-decision.hold{color:var(--y)}
+.tr-confidence{font-size:10px;font-weight:700;color:var(--t3);letter-spacing:.06em}
+.tr-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}
+.tr-cell{padding:8px;border-radius:6px;background:rgba(30,40,65,0.4)}
+.tr-cell-lbl{font-size:7px;font-weight:600;letter-spacing:.12em;color:var(--t4);margin-bottom:3px}
+.tr-cell-val{font-size:14px;font-weight:800;font-variant-numeric:tabular-nums}
+.tr-kelly{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:10px}
+.tr-kelly-item{text-align:center;padding:6px;border-radius:6px;background:rgba(30,40,65,0.3)}
+.tr-kelly-lbl{font-size:6px;font-weight:600;letter-spacing:.14em;color:var(--t4);margin-bottom:2px}
+.tr-kelly-val{font-size:12px;font-weight:800;font-variant-numeric:tabular-nums}
+.tr-kelly-amt{font-size:8px;color:var(--t3);margin-top:1px}
+.tr-reasoning{font-size:8px;color:var(--t3);line-height:1.7;font-weight:400;border-top:1px solid rgba(60,80,120,0.1);padding-top:8px}
+
 /* === COIN TABS === */
 .coin-tabs{
   display:flex;gap:4px;margin:6px 12px;padding:4px;
@@ -447,6 +473,22 @@ body{
     <div class="bet-conv" id="betConv"></div>
     <div class="bet-rationale" id="betRationale"></div>
     <div class="bet-market-warn" id="betMarketWarn" style="display:none"></div>
+  </div>
+  <div class="trade-rec hold-rec" id="tradeRec">
+    <div class="tr-header">
+      <div class="tr-decision hold" id="trDecision">HOLD</div>
+      <div class="tr-confidence" id="trConfidence">--</div>
+    </div>
+    <div class="tr-grid">
+      <div class="tr-cell"><div class="tr-cell-lbl">LIMIT PRICE</div><div class="tr-cell-val" id="trLimit">--</div></div>
+      <div class="tr-cell"><div class="tr-cell-lbl">MARKET PRICE</div><div class="tr-cell-val" id="trMarket">--</div></div>
+    </div>
+    <div class="tr-kelly">
+      <div class="tr-kelly-item"><div class="tr-kelly-lbl">FULL KELLY</div><div class="tr-kelly-val" id="trKFull">--</div><div class="tr-kelly-amt" id="trKFullAmt"></div></div>
+      <div class="tr-kelly-item" style="background:rgba(0,232,123,0.06)"><div class="tr-kelly-lbl">HALF KELLY ✓</div><div class="tr-kelly-val" id="trKHalf">--</div><div class="tr-kelly-amt" id="trKHalfAmt"></div></div>
+      <div class="tr-kelly-item"><div class="tr-kelly-lbl">QUARTER KELLY</div><div class="tr-kelly-val" id="trKQtr">--</div><div class="tr-kelly-amt" id="trKQtrAmt"></div></div>
+    </div>
+    <div class="tr-reasoning" id="trReasoning">Waiting for market data...</div>
   </div>
   <div class="session-stats" id="sessionStats">
     <div class="ss-item"><div class="ss-label">SESSION P&amp;L</div><div class="ss-val" id="ssPnl">$0</div></div>
@@ -2126,6 +2168,114 @@ function betSize(bank,analysis,mode){
   return{amt:amt,frac:pos.sizeAsPct.toFixed(1),note:note,edge:edge}
 }
 
+/* ======== TRADE RECOMMENDATION — Structured prediction-market betting assistant ======== */
+function getBettingRecommendation(analysis,mode,bankroll){
+  var prof=RISK_PROFILES[mode]||RISK_PROFILES.balanced;
+  var result={decision:'Hold',confidence:0,limitPrice:null,fullKelly:0,halfKelly:0,quarterKelly:0,
+    recommendedAmt:0,reasoning:'Insufficient data.',marketPrice:null,edge:0,trueProb:0.5};
+  if(!analysis||!S.price)return result;
+
+  // --- True probability from model ---
+  var trueProb=analysis.probability||0.5;
+  var direction=analysis.call; // 'ABOVE' or 'BELOW'
+
+  // --- Market price from Kalshi ---
+  var kalBid=S.kalshi.bid, kalAsk=S.kalshi.ask, kalLast=S.kalshi.last;
+  var hasKalshi=kalBid!==null&&kalAsk!==null&&isFinite(kalBid)&&isFinite(kalAsk);
+  var marketPrice=hasKalshi?((kalBid+kalAsk)/2):(trueProb); // fallback to model if no Kalshi
+  var spread=hasKalshi?(kalAsk-kalBid):0;
+
+  // For BELOW direction, we're buying the 'No' side: effective cost = 1 - yesPrice
+  var effectiveCost; // what we pay for a contract that pays $1 if we're right
+  if(direction==='ABOVE'){
+    effectiveCost=hasKalshi?kalAsk:marketPrice; // buying Yes
+  }else{
+    effectiveCost=hasKalshi?(1-kalBid):(1-marketPrice); // buying No = selling Yes at bid
+  }
+  // Probability for our chosen direction
+  var probForDir=direction==='ABOVE'?trueProb:(1-trueProb);
+
+  // --- Edge calculation ---
+  var edge=probForDir-effectiveCost;
+  result.trueProb=probForDir;
+  result.marketPrice=hasKalshi?(direction==='ABOVE'?kalAsk:(1-kalBid)):null;
+  result.edge=edge;
+
+  // --- Decision ---
+  if(edge<=0||edge<prof.edgeThresh){
+    result.decision='Hold';
+    result.confidence=Math.round(clamp((1-Math.abs(edge)*10)*30,5,40));
+    result.reasoning='Edge '+(edge*100).toFixed(1)+'pp '+(edge<=0?'negative':'below '+mode+' threshold of '+(prof.edgeThresh*100).toFixed(0)+'pp')+'. No bet.';
+    return result;
+  }
+
+  // Positive edge — determine Buy vs Sell
+  if(direction==='ABOVE'){
+    result.decision='Buy'; // Buy Yes contract
+  }else{
+    result.decision='Sell'; // Sell Yes contract (equivalent to Buy No)
+  }
+
+  // --- Confidence (0-100) ---
+  var confBase=analysis.conf||50;
+  // Discount confidence if: wide spread, low Kalshi volume, high DSE entropy
+  var spreadPenalty=spread>0.10?15:spread>0.05?8:0;
+  var volPenalty=(S.kalshi.volume||0)<50?10:0;
+  var entropyPenalty=analysis.dse&&analysis.dse.entropy>0.6?10:0;
+  result.confidence=clamp(confBase-spreadPenalty-volPenalty-entropyPenalty,5,95);
+
+  // --- Kelly criterion: f* = (p - c) / (1 - c) ---
+  var c=effectiveCost;
+  var fStar=(probForDir-c)/(1-c);
+  fStar=Math.max(0,fStar);
+  result.fullKelly=fStar;
+  result.halfKelly=fStar/2;
+  result.quarterKelly=fStar/4;
+
+  // --- Recommended amount (Half Kelly, risk-adjusted) ---
+  var bank=bankroll||0;
+  if(bank>0){
+    var recFrac=result.halfKelly;
+    // Risk management reductions
+    if(spread>0.08)recFrac*=0.7; // wide spread penalty
+    if(S.risk.currentDD>0.05)recFrac*=Math.max(0.3,1-S.risk.currentDD*3); // drawdown reduction
+    if(result.confidence<50)recFrac*=0.6; // uncertain estimate reduction
+    recFrac=Math.min(recFrac,prof.maxPct); // mode cap
+    result.recommendedAmt=clamp(Math.round(bank*recFrac),0,prof.maxTradeAmt);
+  }
+
+  // --- Limit order price ---
+  if(hasKalshi){
+    var ind=S.ind;
+    var volAdj=ind&&ind.atr?clamp(ind.atr/S.price*50,0,0.03):0; // micro-vol adjustment
+    if(result.decision==='Buy'){
+      // Buy Yes: pay up to midpoint + small premium for fills, but cap at preserving edge
+      var maxWillingPrice=probForDir-prof.edgeThresh*0.5; // preserve half the min edge
+      var suggestedLimit=Math.min(kalAsk, (kalBid+kalAsk)/2+spread*0.3+volAdj);
+      suggestedLimit=Math.min(suggestedLimit,maxWillingPrice);
+      suggestedLimit=Math.max(suggestedLimit,kalBid+0.01); // at least 1c above bid
+      result.limitPrice=Math.round(suggestedLimit*100)/100;
+    }else{
+      // Sell Yes: accept down to midpoint - small discount
+      var minWillingPrice=1-probForDir+prof.edgeThresh*0.5;
+      var suggestedLimit=Math.max(kalBid, (kalBid+kalAsk)/2-spread*0.3-volAdj);
+      suggestedLimit=Math.max(suggestedLimit,minWillingPrice);
+      suggestedLimit=Math.min(suggestedLimit,kalAsk-0.01);
+      result.limitPrice=Math.round(suggestedLimit*100)/100;
+    }
+  }
+
+  // --- Reasoning ---
+  var reasons=[];
+  reasons.push(result.decision+' '+direction+' at '+(effectiveCost*100).toFixed(0)+'¢ — model sees '+(probForDir*100).toFixed(0)+'% true probability, +'+(edge*100).toFixed(1)+'pp edge.');
+  if(hasKalshi)reasons.push('Kalshi: '+Math.round(kalBid*100)+'/'+Math.round(kalAsk*100)+' ('+Math.round(spread*100)+'¢ spread'+(S.kalshi.volume?', '+S.kalshi.volume+' vol':'')+').');
+  if(result.confidence<50)reasons.push('Low confidence — reduce size or pass.');
+  else if(spread>0.08)reasons.push('Wide spread — use limit order for price improvement.');
+  result.reasoning=reasons.join(' ');
+
+  return result;
+}
+
 /* ======== AUTO-LOCK (patient, diligent — only at extreme conviction) ======== */
 function updateLock(){
   if(!S.analysis||S.lockDir)return;
@@ -2377,6 +2527,37 @@ function render(){
   $('ssBets').textContent=S.risk.sessionBets;
   $('ssDd').textContent=(S.risk.currentDD*100).toFixed(1)+'%';
   $('ssDd').style.color=S.risk.currentDD>0.1?CL.r:S.risk.currentDD>0.05?CL.o:CL.t2;
+
+  // Trade Recommendation Panel
+  var trEl=$('tradeRec');
+  if(a){
+    var rec=getBettingRecommendation(a,S.mode,bank);
+    trEl.className='trade-rec '+(rec.decision==='Buy'?'buy-rec':rec.decision==='Sell'?'sell-rec':'hold-rec');
+    var decEl=$('trDecision');
+    decEl.textContent=rec.decision==='Buy'?'\u25B2 BUY '+(a.call||''):rec.decision==='Sell'?'\u25BC SELL YES':'HOLD';
+    decEl.className='tr-decision '+(rec.decision==='Buy'?'buy':rec.decision==='Sell'?'sell':'hold');
+    $('trConfidence').textContent='Confidence: '+rec.confidence+'%';
+    $('trLimit').textContent=rec.limitPrice!==null?(rec.limitPrice*100).toFixed(0)+'\u00a2':'--';
+    $('trLimit').style.color=rec.decision==='Buy'?CL.g:rec.decision==='Sell'?CL.r:CL.t3;
+    $('trMarket').textContent=rec.marketPrice!==null?(rec.marketPrice*100).toFixed(0)+'\u00a2':'N/A';
+    $('trMarket').style.color=CL.t2;
+    // Kelly sizing
+    $('trKFull').textContent=(rec.fullKelly*100).toFixed(1)+'%';
+    $('trKFull').style.color=rec.fullKelly>0?CL.o:CL.t3;
+    $('trKHalf').textContent=(rec.halfKelly*100).toFixed(1)+'%';
+    $('trKHalf').style.color=rec.halfKelly>0?CL.g:CL.t3;
+    $('trKQtr').textContent=(rec.quarterKelly*100).toFixed(1)+'%';
+    $('trKQtr').style.color=rec.quarterKelly>0?CL.b:CL.t3;
+    // Dollar amounts
+    if(bank>0){
+      $('trKFullAmt').textContent=fmt$(Math.round(bank*rec.fullKelly),0);
+      $('trKHalfAmt').textContent=fmt$(Math.round(bank*rec.halfKelly),0);
+      $('trKQtrAmt').textContent=fmt$(Math.round(bank*rec.quarterKelly),0);
+    }else{
+      $('trKFullAmt').textContent='';$('trKHalfAmt').textContent='';$('trKQtrAmt').textContent='';
+    }
+    $('trReasoning').textContent=rec.reasoning;
+  }
 
   // All 3 mode decisions — show every mode simultaneously
   var modeKeys=['safe','balanced','aggressive'];
