@@ -419,6 +419,11 @@ body{
 }
 
 /* === MOBILE RESPONSIVE === */
+@media(max-width:768px){
+  .paired-row{grid-template-columns:1fr;margin:0 6px}
+  .stats-modes-row{grid-template-columns:1fr}
+  .stats-modes-row .session-stats{grid-template-columns:repeat(4,1fr)}
+}
 @media(max-width:480px){
   .sec{padding:8px 8px;margin:3px 6px}
   .hdr{padding:10px 12px;margin:4px 8px}
@@ -433,8 +438,6 @@ body{
   .pos-grid{grid-template-columns:1fr 1fr;gap:8px}
   .session-stats{grid-template-columns:repeat(2,1fr)}
   .dual-panel{grid-template-columns:1fr}
-  .paired-row{grid-template-columns:1fr;margin:0 6px}
-  .stats-modes-row{grid-template-columns:1fr}
   .ftr{font-size:7px;padding:8px}
 }
 </style>
