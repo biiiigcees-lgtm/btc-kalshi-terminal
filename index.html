@@ -1607,8 +1607,8 @@ function analyze(opts){
 /* ======== GENIE TEXT — QUANTITATIVE CRYPTO & PREDICTION MARKET AI ======== */
 function genieText(){
   if(!S.price||!S.ind){
-    if(S.hist.length<26)return'Collecting market data... '+S.hist.length+'/26 samples for full analysis. GENIE quantitative engine standing by.';
-    return'Processing multi-indicator analysis...'
+    if(S.hist.length<26)return'Gathering price data... '+S.hist.length+'/26 readings needed before I can give you a full picture.';
+    return'Crunching the numbers...'
   }
   var p=S.price,ind=S.ind,a=S.analysis,kal=S.kal,mode=S.mode;
   var strike=kal.open||Math.round(p/getCfg().strikeRound)*getCfg().strikeRound;
@@ -1616,81 +1616,81 @@ function genieText(){
   var pts=[];
 
   // Mode identity header
-  if(mode==='aggressive')pts.push('[AGGRESSIVE MODE] Momentum-capture strategy active.');
-  else if(mode==='safe')pts.push('[SAFE MODE] Capital preservation protocol engaged.');
-  else pts.push('[BALANCED MODE] Standard quantitative analysis.');
+  if(mode==='aggressive')pts.push('[AGGRESSIVE] Looking for bigger moves, taking more risk.');
+  else if(mode==='safe')pts.push('[SAFE] Playing it cautious — only betting on strong signals.');
+  else pts.push('[BALANCED] Standard analysis — moderate risk, solid setups.');
 
-  pts.push(getCfg().symbol+' at '+fmt$(p,getCfg().priceDec)+', '+fmt$(Math.abs(diff),getCfg().priceDec)+' '+side+' the '+fmt$(strike,getCfg().priceDec)+' strike.');
+  pts.push(getCfg().symbol+' is at '+fmt$(p,getCfg().priceDec)+', sitting '+fmt$(Math.abs(diff),getCfg().priceDec)+' '+side+' the '+fmt$(strike,getCfg().priceDec)+' line.');
 
-  // Trend — mode-adapted analysis
+  // Trend
   if(ind.e9&&ind.e21){
     var bull=ind.e9>ind.e21,sp=Math.abs((ind.e9-ind.e21)/ind.e21*100);
     if(mode==='aggressive'){
-      if(sp>0.02)pts.push((bull?'Bullish':'Bearish')+' EMA structure ('+sp.toFixed(3)+'% spread) — '+(bull?'momentum favors continuation':'selling pressure dominant')+'. Actionable signal.');
-      else pts.push('EMA spread tight at '+sp.toFixed(3)+'% — breakout imminent. Watching for directional catalyst.');
+      if(sp>0.02)pts.push('Short-term trend is '+(bull?'up':'down')+' — '+(bull?'buyers are in control':'sellers are pushing it lower')+'.');
+      else pts.push('Price is coiling tight — a big move could happen soon.');
     }else if(mode==='safe'){
-      if(sp>0.06)pts.push((bull?'Confirmed bullish':'Confirmed bearish')+' trend with '+sp.toFixed(3)+'% EMA spread. Minimum threshold met for safe entry.');
-      else pts.push('EMA spread insufficient ('+sp.toFixed(3)+'%) for safe mode entry. Need >0.06% for trend confirmation.');
+      if(sp>0.06)pts.push('Clear '+(bull?'uptrend':'downtrend')+' confirmed. Strong enough for a safe bet.');
+      else pts.push('Trend is too weak to bet on safely. Waiting for a clearer move.');
     }else{
-      if(sp>0.04)pts.push((bull?'Bullish':'Bearish')+' trend — EMA 9 '+(bull?'above':'below')+' 21 by '+sp.toFixed(3)+'%.');
-      else pts.push('EMAs converging — trend indecisive, watching for breakout.');
+      if(sp>0.04)pts.push('Trending '+(bull?'up':'down')+' — momentum looks real.');
+      else pts.push('No clear trend yet — price is going sideways.');
     }
   }
 
-  // RSI — mode-adapted interpretation
+  // RSI
   if(ind.r14!==null){
     if(mode==='aggressive'){
-      if(ind.r14>65)pts.push('RSI '+ind.r14.toFixed(0)+' — strong buying momentum, riding the wave.');
-      else if(ind.r14<35)pts.push('RSI '+ind.r14.toFixed(0)+' — oversold bounce setup, contrarian opportunity.');
-      else pts.push('RSI '+ind.r14.toFixed(0)+' — within range, waiting for directional break.');
+      if(ind.r14>65)pts.push('Strong buying pressure (RSI '+ind.r14.toFixed(0)+') — riding the wave up.');
+      else if(ind.r14<35)pts.push('Oversold (RSI '+ind.r14.toFixed(0)+') — could be a bounce opportunity.');
+      else pts.push('Momentum is neutral (RSI '+ind.r14.toFixed(0)+') — waiting for a push.');
     }else if(mode==='safe'){
-      if(ind.r14>70)pts.push('RSI '+ind.r14.toFixed(0)+' — overbought. Safe mode: elevated reversal risk, reducing conviction.');
-      else if(ind.r14<30)pts.push('RSI '+ind.r14.toFixed(0)+' — deeply oversold. Caution: falling knives in safe mode.');
-      else if(ind.r14>55)pts.push('RSI healthy at '+ind.r14.toFixed(0)+' — safe zone for longs.');
-      else if(ind.r14<45)pts.push('RSI weak at '+ind.r14.toFixed(0)+' — safe zone for shorts.');
-      else pts.push('RSI neutral at '+ind.r14.toFixed(0)+' — insufficient directional conviction for safe mode.');
+      if(ind.r14>70)pts.push('Buyers may be exhausted (RSI '+ind.r14.toFixed(0)+') — risky to go long here.');
+      else if(ind.r14<30)pts.push('Heavy selling (RSI '+ind.r14.toFixed(0)+') — could keep falling, staying cautious.');
+      else if(ind.r14>55)pts.push('Healthy buying (RSI '+ind.r14.toFixed(0)+') — good setup for longs.');
+      else if(ind.r14<45)pts.push('Selling building (RSI '+ind.r14.toFixed(0)+') — favors the downside.');
+      else pts.push('Middle of the road (RSI '+ind.r14.toFixed(0)+') — no strong lean either way.');
     }else{
-      if(ind.r14>70)pts.push('RSI '+ind.r14.toFixed(0)+' — overbought, reversal risk.');
-      else if(ind.r14>55)pts.push('RSI healthy at '+ind.r14.toFixed(0)+' — buying momentum intact.');
-      else if(ind.r14>45)pts.push('RSI neutral at '+ind.r14.toFixed(0)+' — no clear directional bias.');
-      else if(ind.r14>30)pts.push('RSI weak at '+ind.r14.toFixed(0)+' — selling pressure building.');
-      else pts.push('RSI '+ind.r14.toFixed(0)+' — deeply oversold, bounce potential.');
+      if(ind.r14>70)pts.push('Stretched high (RSI '+ind.r14.toFixed(0)+') — could snap back down.');
+      else if(ind.r14>55)pts.push('Buyers in control (RSI '+ind.r14.toFixed(0)+').');
+      else if(ind.r14>45)pts.push('Flat momentum (RSI '+ind.r14.toFixed(0)+') — could go either way.');
+      else if(ind.r14>30)pts.push('Sellers gaining ground (RSI '+ind.r14.toFixed(0)+').');
+      else pts.push('Deeply oversold (RSI '+ind.r14.toFixed(0)+') — bounce is possible.');
     }
   }
 
   // MACD
   if(ind.mc){
-    if(ind.mc.crossUp)pts.push('MACD bullish crossover'+(mode==='aggressive'?' — high-priority entry signal.':mode==='safe'?' — need additional confirmation before acting.':' — fresh momentum signal.'));
-    else if(ind.mc.crossDown)pts.push('MACD bearish crossover'+(mode==='aggressive'?' — reversing position bias immediately.':mode==='safe'?' — increasing defensive posture.':' — momentum shifting to sellers.'));
-    else if(ind.mc.hist>0)pts.push('MACD histogram positive — bulls in control.');
-    else pts.push('MACD histogram negative — bears have the edge.');
+    if(ind.mc.crossUp)pts.push('Fresh buy signal just fired'+(mode==='safe'?' — but we need more proof before acting.':' — momentum shifting to buyers.'));
+    else if(ind.mc.crossDown)pts.push('Fresh sell signal just fired'+(mode==='safe'?' — going defensive.':' — momentum shifting to sellers.'));
+    else if(ind.mc.hist>0)pts.push('Buyers have the momentum right now.');
+    else pts.push('Sellers have the momentum right now.');
   }
 
-  // Order flow — mode matters
+  // Order flow
   var imb=S.ob.imb;
   if(Math.abs(imb)>0.08){
-    if(mode==='aggressive')pts.push('Order book '+(imb>0?'bid':'ask')+'-heavy at '+Math.abs(imb*100).toFixed(0)+'% — '+(imb>0?'aggressive buying pressure, front-running institutional flow':'heavy sell walls, shorting the weakness')+'.');
-    else if(mode==='safe')pts.push('Order book '+(imb>0?'bid':'ask')+'-heavy at '+Math.abs(imb*100).toFixed(0)+'% — '+(imb>0?'institutional support provides downside floor':'sell pressure warrants caution')+'.');
-    else pts.push('Order book '+(imb>0?'bid':'ask')+'-heavy at '+Math.abs(imb*100).toFixed(0)+'% — '+(imb>0?'institutional buying':'sell-side pressure')+'.');
+    if(mode==='aggressive')pts.push((imb>0?'Big buyers stacking orders':'Heavy selling in the order book')+' ('+Math.abs(imb*100).toFixed(0)+'% imbalance) — '+(imb>0?'following the money up.':'following the money down.'));
+    else if(mode==='safe')pts.push((imb>0?'Buyers are providing support below':'Sellers are stacked above')+' ('+Math.abs(imb*100).toFixed(0)+'% imbalance) — '+(imb>0?'gives us a safety net.':'adds risk.'));
+    else pts.push((imb>0?'More buyers than sellers':'More sellers than buyers')+' in the order book ('+Math.abs(imb*100).toFixed(0)+'% lean).');
   }
 
-  // Regime — mode-specific reaction
+  // Regime
   var regTxt=ind.regime.replace('_',' ');
   if(mode==='aggressive'){
-    pts.push('Regime: '+regTxt+' — '+(ind.regime==='trending_up'?'perfect for momentum plays, maximizing exposure':ind.regime==='trending_down'?'shorting into weakness, tracking sell-side flow':ind.regime==='compression'?'pre-breakout compression detected, positioning for explosive move':ind.regime==='volatile'?'volatility = opportunity, widening targets':'monitoring for regime shift trigger')+'.');
+    pts.push('Market feels: '+(ind.regime==='trending_up'?'strong uptrend — great for riding momentum up':ind.regime==='trending_down'?'strong downtrend — good for betting on lower prices':ind.regime==='compression'?'squeezed tight — a breakout is coming, getting ready':ind.regime==='volatile'?'wild and choppy — bigger swings mean bigger opportunities':'unclear — watching for the next move')+'.');
   }else if(mode==='safe'){
-    pts.push('Regime: '+regTxt+' — '+(ind.regime==='trending_up'?'safe to follow established trend':ind.regime==='trending_down'?'safe to follow established downtrend':ind.regime==='compression'?'WARNING: direction uncertain, safe mode defers entry':ind.regime==='volatile'?'CAUTION: elevated risk, safe mode reduces position sizing':'insufficient regime clarity for safe deployment')+'.');
+    pts.push('Market feels: '+(ind.regime==='trending_up'?'steady uptrend — safe to follow':ind.regime==='trending_down'?'steady downtrend — safe to follow down':ind.regime==='compression'?'squeezed — direction unclear, sitting out until it breaks':ind.regime==='volatile'?'too choppy — reducing bets to protect capital':'no clear pattern — waiting for something clearer')+'.');
   }else{
-    pts.push('Regime: '+regTxt+' — '+(ind.regime==='trending_up'?'ride the trend':ind.regime==='trending_down'?'follow the sell-off':ind.regime==='compression'?'breakout imminent, stay alert':ind.regime==='volatile'?'choppy conditions, reduce exposure':'waiting for directional clarity')+'.');
+    pts.push('Market feels: '+(ind.regime==='trending_up'?'trending up — going with the flow':ind.regime==='trending_down'?'trending down — leaning bearish':ind.regime==='compression'?'coiled up — breakout coming soon':ind.regime==='volatile'?'choppy — tread carefully':'quiet — waiting for a catalyst')+'.');
   }
 
-  // Trajectory + projected price
+  // Trajectory
   if(S.traj&&a&&a.projPrice){
     var pSide=a.projPrice>strike?'above':'below';
-    pts.push('Projected close: '+fmt$(a.projPrice,getCfg().priceDec)+' ('+pSide+' strike, '+S.traj.conf.toFixed(0)+'% model fit).');
+    pts.push('My best guess for where this closes: '+fmt$(a.projPrice,getCfg().priceDec)+' ('+pSide+' the line, '+S.traj.conf.toFixed(0)+'% model confidence).');
   }
 
-  // 15-minute higher timeframe analysis
+  // 15-minute higher timeframe
   var i15=S.ind15m;
   if(i15){
     var htfDir='neutral';
@@ -1698,43 +1698,37 @@ function genieText(){
     var htfReg=i15.regime.replace('_',' ');
     var agree1m=ind.e9&&ind.e21&&i15.e9&&i15.e21&&((ind.e9>ind.e21)===(i15.e9>i15.e21));
     if(mode==='aggressive'){
-      pts.push('15M macro: '+htfDir+' ('+htfReg+'). '+(agree1m?'1M and 15M aligned \u2014 full conviction, riding the trend.':'1M/15M divergence detected \u2014 '+htfDir+' macro bias may override short-term noise.'));
+      pts.push('Bigger picture (15-min): '+htfDir+'. '+(agree1m?'Both timeframes agree — full send.':'Short-term and big picture disagree — the bigger trend may win out.'));
     }else if(mode==='safe'){
-      pts.push('15M macro: '+htfDir+' ('+htfReg+'). '+(agree1m?'Multi-timeframe alignment confirmed \u2014 safe entry criteria strengthened.':'CAUTION: 15M trend contradicts 1M \u2014 safe mode requires alignment, reducing conviction.'));
+      pts.push('Bigger picture (15-min): '+htfDir+'. '+(agree1m?'Both timeframes line up — gives me more confidence.':'Short-term and big picture don\'t match — staying cautious.'));
     }else{
-      pts.push('15M macro context: '+htfDir+' trend in '+htfReg+' regime. '+(agree1m?'Timeframes aligned \u2014 higher confidence setup.':'Timeframe divergence \u2014 waiting for alignment before full deployment.'));
+      pts.push('Bigger picture (15-min): '+htfDir+' in a '+htfReg+' market. '+(agree1m?'All timeframes agree — stronger signal.':'Timeframes disagree — signal is weaker.'));
     }
-    if(i15.r14!==null)pts.push('15M RSI: '+i15.r14.toFixed(0)+' '+(i15.r14>60?'\u2014 macro buying pressure':i15.r14<40?'\u2014 macro selling pressure':'\u2014 macro neutral')+'.');
+    if(i15.r14!==null)pts.push('15-min momentum: '+(i15.r14>60?'buyers pushing hard':i15.r14<40?'sellers in control':'neither side winning')+' (RSI '+i15.r14.toFixed(0)+').');
   }else{
-    pts.push('15M analysis: loading historical chart data for macro context...');
+    pts.push('Still loading the bigger picture (15-min data)...');
   }
 
-  // Final call — binary-aware, always picks a side (one MUST win on Kalshi)
+  // Final call
   if(a){
     var dseI=a.dse||{};
     var evI=S.ev;
     var confI=S.conf;
-    var betLabel=a.isBet?'BET':'LEAN';
+    var isBet=a.isBet;
     if(a.call==='ABOVE'){
-      pts.push(betLabel+' ABOVE \u2014 '+a.conf+'% confidence. EV='+evI.ev.toFixed(3)+', edge='+evI.edge.toFixed(3)+'. '+confI.aligned+'/'+confI.required+' signal classes confirm.');
-      if(a.isBet)pts.push('Actionable: deploy capital per Kelly sizing.');
-      else pts.push('Directional lean only \u2014 confidence below bet threshold. One side MUST win.');
+      pts.push((isBet?'BETTING':'LEANING')+' ABOVE — '+a.conf+'% sure. '+(isBet?'This looks like a real opportunity.':'Not confident enough to bet, but I think it\'s going up.'));
     }else{
-      pts.push(betLabel+' BELOW \u2014 '+a.conf+'% confidence. EV='+evI.ev.toFixed(3)+', edge='+evI.edge.toFixed(3)+'. '+confI.aligned+'/'+confI.required+' signal classes confirm.');
-      if(a.isBet)pts.push('Actionable: deploy capital per Kelly sizing.');
-      else pts.push('Directional lean only \u2014 confidence below bet threshold. One side MUST win.');
+      pts.push((isBet?'BETTING':'LEANING')+' BELOW — '+a.conf+'% sure. '+(isBet?'This looks like a real opportunity.':'Not confident enough to bet, but I think it\'s going down.'));
     }
-    // Show all mode decisions in GENIE text
+    // Show all mode decisions
     if(a.allModes){
       var am=a.allModes;
-      pts.push('ALL MODES: Safe='+am.safe.call+' '+am.safe.conf+'%'+(am.safe.bet?' BET':' LEAN')+' | Balanced='+am.balanced.call+' '+am.balanced.conf+'%'+(am.balanced.bet?' BET':' LEAN')+' | Aggressive='+am.aggressive.call+' '+am.aggressive.conf+'%'+(am.aggressive.bet?' BET':' LEAN')+'.');
+      pts.push('All modes: Safe says '+am.safe.call+' ('+am.safe.conf+'%'+(am.safe.bet?', betting':'')+') | Balanced says '+am.balanced.call+' ('+am.balanced.conf+'%'+(am.balanced.bet?', betting':'')+') | Aggressive says '+am.aggressive.call+' ('+am.aggressive.conf+'%'+(am.aggressive.bet?', betting':'')+').');
     }
-    if(S.risk.currentDD>0.05)pts.push('Drawdown: '+(S.risk.currentDD*100).toFixed(1)+'% \u2014 risk throttle at '+(S.risk.throttle*100).toFixed(0)+'%.');
-    // Mode-entropy conflict advisory
+    if(S.risk.currentDD>0.05)pts.push('Heads up: you\'re down '+(S.risk.currentDD*100).toFixed(1)+'% this session — auto-reducing bet sizes to protect your bankroll.');
     if(a.modeConflict)pts.push('\u26A0\uFE0F '+a.modeConflict);
-    // S/R context
     if(a.sr&&a.sr.nearest){
-      pts.push('Key level: '+a.sr.nearest.type+' at '+fmt$(a.sr.nearest.price,getCfg().priceDec)+' ('+a.sr.nearest.touches+'x tested).');
+      pts.push('Key price level: '+(a.sr.nearest.type==='support'?'support':'resistance')+' at '+fmt$(a.sr.nearest.price,getCfg().priceDec)+' (tested '+a.sr.nearest.touches+'x) — '+(a.sr.nearest.type==='support'?'price tends to bounce here.':'price tends to stall here.'));
     }
   }
 
