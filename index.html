@@ -593,12 +593,25 @@ body{
     </div>
   </div>
   </div>
-  <div class="tgt-analysis" id="tgtAnalysis" style="display:none">
-    <div class="stl">TARGET PRICE ANALYSIS</div>
-    <div class="tgt-dir" id="tgtDir">--</div>
-    <div class="tgt-prob" id="tgtProb"></div>
-    <div class="tgt-conf-tag" id="tgtConfTag"></div>
-    <div class="tgt-rationale" id="tgtRationale"></div>
+  <div class="tgt-analysis" id="tgtAnalysis">
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <div class="stl">Deep-analyze (15-minute round)</div>
+      <button id="deepAnalyzeBtn" style="font-size:10px;padding:4px 10px;border-radius:8px;border:1px solid var(--glass-border);background:var(--glass);color:var(--t2);cursor:pointer;">Deep-analyze</button>
+    </div>
+    <div style="margin-top:6px">
+      <table style="width:100%;font-size:10px;border-collapse:collapse;margin-bottom:6px;">
+        <tr style="background:rgba(30,40,65,0.12)"><th style="text-align:left;padding:2px 4px;">Question</th><th style="text-align:left;padding:2px 4px;">Answer</th><th style="text-align:right;padding:2px 4px;">Confidence</th><th style="text-align:left;padding:2px 4px;">Reasoning</th></tr>
+        <tr>
+          <td style="padding:2px 4px;">End-of-round price vs. target</td>
+          <td style="padding:2px 4px;" id="tgtDir">--</td>
+          <td style="padding:2px 4px;text-align:right;" id="tgtProb"></td>
+          <td style="padding:2px 4px;" id="tgtRationaleCell"></td>
+        </tr>
+      </table>
+      <div class="tgt-conf-tag" id="tgtConfTag"></div>
+      <div class="tgt-rationale" id="tgtRationale"></div>
+      <div id="tgtWarning" style="font-size:9px;color:var(--o);margin-top:4px;">This is a predictive bet, not a certainty. Only bet what you can afford to lose.</div>
+    </div>
   </div>
 </div>
 
@@ -2281,7 +2294,17 @@ function getBettingRecommendation(analysis,mode,bankroll){
   result.edge=edge;
 
   // --- Decision ---
-  if(edge<=0||edge<prof.edgeThresh){
+  // More willing to recommend a bet when the edge is clear, especially for balanced/aggressive
+  var edgeThreshold = prof.edgeThresh;
+  var recommendBet = false;
+  if (edge > 0 && edge >= edgeThreshold) {
+    recommendBet = true;
+  } else if (edge > 0 && (mode === 'balanced' || mode === 'aggressive') && edge >= edgeThreshold * 0.7) {
+    // For balanced/aggressive, be more willing to bet if edge is close to threshold
+    recommendBet = true;
+  }
+
+  if(!recommendBet){
     result.decision='Hold';
     result.confidence=Math.round(clamp((1-Math.abs(edge)*10)*30,5,40));
     result.reasoning=edge<=0?'Price looks pretty fair rn — no real deal to grab here.':'The edge is only '+(edge*100).toFixed(1)+'¢, not enough for '+mode+' mode (needs '+(prof.edgeThresh*100).toFixed(0)+'¢+). Gonna sit this one out.';
@@ -2668,17 +2691,20 @@ function render(){
   }
 
   // Target Price Analysis — runs when user enters a target
-  var userTarget=parseFloat(($('inTarget')||{}).value)||0;
   var tgtEl=$('tgtAnalysis');
+  var userTarget=parseFloat(($('inTarget')||{}).value)||0;
+  // Always show the deep-analyze section, but only fill in results if target is set and data is available
   if(userTarget>0&&p&&S.hist.length>=30){
     var tpa=analyzeTargetPrice(p,userTarget,S.kal.tl,S.hist,{
       ind:ind,ind15m:S.ind15m,ob:ob,dse:S.dse,traj:S.traj,_startTs:S._startTs
     });
-    tgtEl.style.display='';
     $('tgtDir').textContent=tpa.direction;
     $('tgtDir').style.color=tpa.direction==='ABOVE'?CL.g:CL.r;
-    $('tgtProb').textContent=Math.round(tpa.probability*100)+'% probability';
+    $('tgtProb').textContent=Math.round(tpa.probability*100)+'%';
     $('tgtProb').style.color=tpa.direction==='ABOVE'?CL.g:CL.r;
+    // Table cell reasoning (first 2-4 bullets)
+    var reasoningShort = tpa.rationale.slice(0,4).join(' ');
+    $('tgtRationaleCell').textContent = reasoningShort;
     // Show Kalshi edge if available
     if(tpa.kalshiEdge!==null){
       $('tgtProb').textContent+=(' \u00B7 '+(tpa.kalshiEdge>0?'+':'')+Math.round(tpa.kalshiEdge*100)+'pp edge vs Kalshi');
@@ -2693,7 +2719,27 @@ function render(){
     }
     $('tgtRationale').innerHTML=bhtml;
   }else{
-    tgtEl.style.display='none'
+    // Clear outputs if not available
+    $('tgtDir').textContent='--';
+    $('tgtDir').style.color=CL.t3;
+    $('tgtProb').textContent='';
+    $('tgtProb').style.color=CL.t3;
+    $('tgtRationaleCell').textContent='';
+    $('tgtConfTag').textContent='';
+    $('tgtRationale').innerHTML='';
+  }
+
+  // Deep-analyze button event (always active)
+  var deepBtn = document.getElementById('deepAnalyzeBtn');
+  if(deepBtn) {
+    deepBtn.onclick = function() {
+      var target = S.kal.open || (S.price ? Math.round(S.price/getCfg().strikeRound)*getCfg().strikeRound : 0);
+      if(target) {
+        if($('inTarget')) $('inTarget').value = target;
+        tick();
+        tgtEl.scrollIntoView({behavior:'smooth',block:'center'});
+      }
+    };
   }
 
   // GENIE text + snap row
