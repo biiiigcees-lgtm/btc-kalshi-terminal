@@ -376,6 +376,24 @@ body{
 .dual-panel .bet-sug{margin-top:0}
 .dual-panel .trade-rec{margin-top:0}
 
+/* === PAIRED ROWS — two sections side by side === */
+.paired-row{
+  display:grid;grid-template-columns:1fr 1fr;gap:4px;
+  margin:0 10px;
+}
+.paired-row>.sec{margin:4px 0}
+.paired-row>.sec.glass{height:fit-content}
+.paired-row .ind-grid{grid-template-columns:repeat(3,1fr)}
+.paired-row .genie-snap{grid-template-columns:repeat(2,1fr)}
+
+/* === STATS + MODES side by side === */
+.stats-modes-row{
+  display:grid;grid-template-columns:1fr 1fr;gap:6px;
+  margin-top:8px;
+}
+.stats-modes-row .session-stats{margin-top:0;grid-template-columns:repeat(2,1fr)}
+.stats-modes-row .mode-decisions{margin-top:0}
+
 /* === COIN TABS === */
 .coin-tabs{
   display:flex;gap:4px;margin:6px 12px;padding:4px;
@@ -415,6 +433,8 @@ body{
   .pos-grid{grid-template-columns:1fr 1fr;gap:8px}
   .session-stats{grid-template-columns:repeat(2,1fr)}
   .dual-panel{grid-template-columns:1fr}
+  .paired-row{grid-template-columns:1fr;margin:0 6px}
+  .stats-modes-row{grid-template-columns:1fr}
   .ftr{font-size:7px;padding:8px}
 }
 </style>
@@ -512,6 +532,7 @@ body{
     <button class="mode-btn" data-m="aggressive" onclick="setMode('aggressive')">&#x1F525; AGGRESSIVE</button>
   </div>
   <div class="mode-desc" id="modeDesc">Moderate stakes with disciplined edge thresholds. Balances growth and risk for steady, consistent returns across market conditions.</div>
+  <div class="stats-modes-row">
   <div class="session-stats" id="sessionStats">
     <div class="ss-item"><div class="ss-label">SESSION P&amp;L</div><div class="ss-val" id="ssPnl">$0</div></div>
     <div class="ss-item"><div class="ss-label">WIN RATE</div><div class="ss-val" id="ssWinRate">--%</div></div>
@@ -538,6 +559,7 @@ body{
       <div class="mc-why" id="mcAggressiveWhy"></div>
     </div>
   </div>
+  </div>
   <div class="tgt-analysis" id="tgtAnalysis" style="display:none">
     <div class="stl">TARGET PRICE ANALYSIS</div>
     <div class="tgt-dir" id="tgtDir">--</div>
@@ -547,6 +569,7 @@ body{
   </div>
 </div>
 
+<div class="paired-row">
 <div class="sec glass">
   <div class="stl">GENIE ANALYSIS</div>
   <div class="genie-snap" id="genieSnap">
@@ -559,6 +582,13 @@ body{
   <div class="genie-logs" id="gLogs"></div>
 </div>
 
+<div class="sec glass">
+  <div class="stl">SIGNAL BREAKDOWN</div>
+  <div id="bdRows"></div>
+</div>
+</div>
+
+<div class="paired-row">
 <div class="sec glass">
   <div class="stl">TECHNICAL INDICATORS</div>
   <div class="ind-grid">
@@ -578,13 +608,9 @@ body{
 </div>
 
 <div class="sec glass">
-  <div class="stl">SIGNAL BREAKDOWN</div>
-  <div id="bdRows"></div>
-</div>
-
-<div class="sec glass">
   <div class="stl">ORDER BOOK DEPTH</div>
   <div id="obDiv"><div style="text-align:center;font-size:10px;color:var(--t4)">Loading...</div></div>
+</div>
 </div>
 
 <div class="ftr">Live data · Composite Price (Coinbase + Kraken) · Funding Rate · Kalshi Market · GENIE v6.0</div>
