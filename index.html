@@ -1607,90 +1607,89 @@ function analyze(opts){
 /* ======== GENIE TEXT — QUANTITATIVE CRYPTO & PREDICTION MARKET AI ======== */
 function genieText(){
   if(!S.price||!S.ind){
-    if(S.hist.length<26)return'Gathering price data... '+S.hist.length+'/26 readings needed before I can give you a full picture.';
-    return'Crunching the numbers...'
+    if(S.hist.length<26)return'Yo, still loading... '+S.hist.length+'/26 data points in. Gimme a sec to get the full read.';
+    return'Hold tight, crunching the numbers...'
   }
   var p=S.price,ind=S.ind,a=S.analysis,kal=S.kal,mode=S.mode;
   var strike=kal.open||Math.round(p/getCfg().strikeRound)*getCfg().strikeRound;
   var diff=p-strike,side=diff>=0?'above':'below';
   var pts=[];
 
-  // Mode identity header
-  if(mode==='aggressive')pts.push('[AGGRESSIVE] Looking for bigger moves, taking more risk.');
-  else if(mode==='safe')pts.push('[SAFE] Playing it cautious — only betting on strong signals.');
-  else pts.push('[BALANCED] Standard analysis — moderate risk, solid setups.');
+  // Mode header
+  if(mode==='aggressive')pts.push('[AGGRESSIVE] We\'re swinging big — looking for juicy setups.');
+  else if(mode==='safe')pts.push('[SAFE] Playing it chill — only moving on the cleanest signals.');
+  else pts.push('[BALANCED] Keeping it steady — decent risk, solid plays.');
 
-  pts.push(getCfg().symbol+' is at '+fmt$(p,getCfg().priceDec)+', sitting '+fmt$(Math.abs(diff),getCfg().priceDec)+' '+side+' the '+fmt$(strike,getCfg().priceDec)+' line.');
+  pts.push(getCfg().symbol+' sitting at '+fmt$(p,getCfg().priceDec)+', that\'s '+fmt$(Math.abs(diff),getCfg().priceDec)+' '+side+' the '+fmt$(strike,getCfg().priceDec)+' line rn.');
 
   // Trend
   if(ind.e9&&ind.e21){
     var bull=ind.e9>ind.e21,sp=Math.abs((ind.e9-ind.e21)/ind.e21*100);
     if(mode==='aggressive'){
-      if(sp>0.02)pts.push('Short-term trend is '+(bull?'up':'down')+' — '+(bull?'buyers are in control':'sellers are pushing it lower')+'.');
-      else pts.push('Price is coiling tight — a big move could happen soon.');
+      if(sp>0.02)pts.push('Short-term trend is '+(bull?'up — buyers running it':'down — sellers in the driver\'s seat')+'.');
+      else pts.push('Price is coiling up tight — somethin\'s about to pop.');
     }else if(mode==='safe'){
-      if(sp>0.06)pts.push('Clear '+(bull?'uptrend':'downtrend')+' confirmed. Strong enough for a safe bet.');
-      else pts.push('Trend is too weak to bet on safely. Waiting for a clearer move.');
+      if(sp>0.06)pts.push('Clear '+(bull?'uptrend':'downtrend')+' locked in. Clean enough for a safe play.');
+      else pts.push('Trend\'s too shaky to bet on safely. Gonna wait for a stronger move.');
     }else{
-      if(sp>0.04)pts.push('Trending '+(bull?'up':'down')+' — momentum looks real.');
-      else pts.push('No clear trend yet — price is going sideways.');
+      if(sp>0.04)pts.push('Trending '+(bull?'up':'down')+' — the move looks legit.');
+      else pts.push('No real trend yet — kinda just chopping sideways.');
     }
   }
 
   // RSI
   if(ind.r14!==null){
     if(mode==='aggressive'){
-      if(ind.r14>65)pts.push('Strong buying pressure (RSI '+ind.r14.toFixed(0)+') — riding the wave up.');
-      else if(ind.r14<35)pts.push('Oversold (RSI '+ind.r14.toFixed(0)+') — could be a bounce opportunity.');
-      else pts.push('Momentum is neutral (RSI '+ind.r14.toFixed(0)+') — waiting for a push.');
+      if(ind.r14>65)pts.push('Buyers going hard (RSI '+ind.r14.toFixed(0)+') — riding this wave.');
+      else if(ind.r14<35)pts.push('Way oversold (RSI '+ind.r14.toFixed(0)+') — bounce play looking tasty.');
+      else pts.push('Momentum\'s chillin\' (RSI '+ind.r14.toFixed(0)+') — waiting for it to pick a direction.');
     }else if(mode==='safe'){
-      if(ind.r14>70)pts.push('Buyers may be exhausted (RSI '+ind.r14.toFixed(0)+') — risky to go long here.');
-      else if(ind.r14<30)pts.push('Heavy selling (RSI '+ind.r14.toFixed(0)+') — could keep falling, staying cautious.');
-      else if(ind.r14>55)pts.push('Healthy buying (RSI '+ind.r14.toFixed(0)+') — good setup for longs.');
-      else if(ind.r14<45)pts.push('Selling building (RSI '+ind.r14.toFixed(0)+') — favors the downside.');
-      else pts.push('Middle of the road (RSI '+ind.r14.toFixed(0)+') — no strong lean either way.');
+      if(ind.r14>70)pts.push('Buyers might be gassed (RSI '+ind.r14.toFixed(0)+') — risky to jump in long here.');
+      else if(ind.r14<30)pts.push('Heavy selling going on (RSI '+ind.r14.toFixed(0)+') — could keep dropping, playing it safe.');
+      else if(ind.r14>55)pts.push('Nice healthy buying (RSI '+ind.r14.toFixed(0)+') — solid setup for longs.');
+      else if(ind.r14<45)pts.push('Sell pressure picking up (RSI '+ind.r14.toFixed(0)+') — favors the downside.');
+      else pts.push('Right in the middle (RSI '+ind.r14.toFixed(0)+') — no strong lean.');
     }else{
-      if(ind.r14>70)pts.push('Stretched high (RSI '+ind.r14.toFixed(0)+') — could snap back down.');
-      else if(ind.r14>55)pts.push('Buyers in control (RSI '+ind.r14.toFixed(0)+').');
-      else if(ind.r14>45)pts.push('Flat momentum (RSI '+ind.r14.toFixed(0)+') — could go either way.');
-      else if(ind.r14>30)pts.push('Sellers gaining ground (RSI '+ind.r14.toFixed(0)+').');
-      else pts.push('Deeply oversold (RSI '+ind.r14.toFixed(0)+') — bounce is possible.');
+      if(ind.r14>70)pts.push('Stretched way up (RSI '+ind.r14.toFixed(0)+') — might snap back.');
+      else if(ind.r14>55)pts.push('Buyers got control (RSI '+ind.r14.toFixed(0)+').');
+      else if(ind.r14>45)pts.push('Momentum\'s flat (RSI '+ind.r14.toFixed(0)+') — could go either way.');
+      else if(ind.r14>30)pts.push('Sellers creeping in (RSI '+ind.r14.toFixed(0)+').');
+      else pts.push('Super oversold (RSI '+ind.r14.toFixed(0)+') — a bounce wouldn\'t be crazy.');
     }
   }
 
   // MACD
   if(ind.mc){
-    if(ind.mc.crossUp)pts.push('Fresh buy signal just fired'+(mode==='safe'?' — but we need more proof before acting.':' — momentum shifting to buyers.'));
-    else if(ind.mc.crossDown)pts.push('Fresh sell signal just fired'+(mode==='safe'?' — going defensive.':' — momentum shifting to sellers.'));
-    else if(ind.mc.hist>0)pts.push('Buyers have the momentum right now.');
-    else pts.push('Sellers have the momentum right now.');
+    if(ind.mc.crossUp)pts.push('Just got a fresh buy signal'+(mode==='safe'?' — but need more proof before we move.':' — momentum flipping to buyers.'));
+    else if(ind.mc.crossDown)pts.push('Just got a fresh sell signal'+(mode==='safe'?' — tightening up.':' — momentum flipping to sellers.'));
+    else if(ind.mc.hist>0)pts.push('Buyers got the momentum rn.');
+    else pts.push('Sellers got the momentum rn.');
   }
 
   // Order flow
   var imb=S.ob.imb;
   if(Math.abs(imb)>0.08){
-    if(mode==='aggressive')pts.push((imb>0?'Big buyers stacking orders':'Heavy selling in the order book')+' ('+Math.abs(imb*100).toFixed(0)+'% imbalance) — '+(imb>0?'following the money up.':'following the money down.'));
-    else if(mode==='safe')pts.push((imb>0?'Buyers are providing support below':'Sellers are stacked above')+' ('+Math.abs(imb*100).toFixed(0)+'% imbalance) — '+(imb>0?'gives us a safety net.':'adds risk.'));
-    else pts.push((imb>0?'More buyers than sellers':'More sellers than buyers')+' in the order book ('+Math.abs(imb*100).toFixed(0)+'% lean).');
+    if(mode==='aggressive')pts.push((imb>0?'Big money stacking buys':'Whales dumping in the book')+' ('+Math.abs(imb*100).toFixed(0)+'% lean) — '+(imb>0?'following the smart money up.':'following the flow down.'));
+    else if(mode==='safe')pts.push((imb>0?'Solid buy support underneath':'Sell walls above us')+' ('+Math.abs(imb*100).toFixed(0)+'% lean) — '+(imb>0?'that\'s a nice safety cushion.':'that adds some risk.'));
+    else pts.push((imb>0?'More buys than sells':'More sells than buys')+' on the books ('+Math.abs(imb*100).toFixed(0)+'% lean).');
   }
 
   // Regime
-  var regTxt=ind.regime.replace('_',' ');
   if(mode==='aggressive'){
-    pts.push('Market feels: '+(ind.regime==='trending_up'?'strong uptrend — great for riding momentum up':ind.regime==='trending_down'?'strong downtrend — good for betting on lower prices':ind.regime==='compression'?'squeezed tight — a breakout is coming, getting ready':ind.regime==='volatile'?'wild and choppy — bigger swings mean bigger opportunities':'unclear — watching for the next move')+'.');
+    pts.push('Vibe check: '+(ind.regime==='trending_up'?'strong run up — perfect for riding momentum':ind.regime==='trending_down'?'dropping hard — solid for betting lower':ind.regime==='compression'?'super tight squeeze — a big move is loading up':ind.regime==='volatile'?'wild swings — risky but bigger opportunities':'kinda dead — waiting for something to pop')+'.');
   }else if(mode==='safe'){
-    pts.push('Market feels: '+(ind.regime==='trending_up'?'steady uptrend — safe to follow':ind.regime==='trending_down'?'steady downtrend — safe to follow down':ind.regime==='compression'?'squeezed — direction unclear, sitting out until it breaks':ind.regime==='volatile'?'too choppy — reducing bets to protect capital':'no clear pattern — waiting for something clearer')+'.');
+    pts.push('Vibe check: '+(ind.regime==='trending_up'?'steady climb — safe to ride along':ind.regime==='trending_down'?'steady drop — safe to follow down':ind.regime==='compression'?'squeezed up — can\'t tell which way yet, sitting out':ind.regime==='volatile'?'too choppy rn — scaling back to protect the bag':'quiet out here — waiting for clarity')+'.');
   }else{
-    pts.push('Market feels: '+(ind.regime==='trending_up'?'trending up — going with the flow':ind.regime==='trending_down'?'trending down — leaning bearish':ind.regime==='compression'?'coiled up — breakout coming soon':ind.regime==='volatile'?'choppy — tread carefully':'quiet — waiting for a catalyst')+'.');
+    pts.push('Vibe check: '+(ind.regime==='trending_up'?'moving up — going with it':ind.regime==='trending_down'?'moving down — leaning bearish':ind.regime==='compression'?'wound up tight — breakout incoming':ind.regime==='volatile'?'choppy waters — being careful':'pretty quiet — need a catalyst')+'.');
   }
 
   // Trajectory
   if(S.traj&&a&&a.projPrice){
     var pSide=a.projPrice>strike?'above':'below';
-    pts.push('My best guess for where this closes: '+fmt$(a.projPrice,getCfg().priceDec)+' ('+pSide+' the line, '+S.traj.conf.toFixed(0)+'% model confidence).');
+    pts.push('Best guess where this lands: '+fmt$(a.projPrice,getCfg().priceDec)+' ('+pSide+' the line, '+S.traj.conf.toFixed(0)+'% confident on that).');
   }
 
-  // 15-minute higher timeframe
+  // 15-min bigger picture
   var i15=S.ind15m;
   if(i15){
     var htfDir='neutral';
@@ -1698,15 +1697,15 @@ function genieText(){
     var htfReg=i15.regime.replace('_',' ');
     var agree1m=ind.e9&&ind.e21&&i15.e9&&i15.e21&&((ind.e9>ind.e21)===(i15.e9>i15.e21));
     if(mode==='aggressive'){
-      pts.push('Bigger picture (15-min): '+htfDir+'. '+(agree1m?'Both timeframes agree — full send.':'Short-term and big picture disagree — the bigger trend may win out.'));
+      pts.push('Zooming out (15-min): '+htfDir+'. '+(agree1m?'Both timeframes lined up — full send.':'Short-term and big picture don\'t agree — bigger trend might win.'));
     }else if(mode==='safe'){
-      pts.push('Bigger picture (15-min): '+htfDir+'. '+(agree1m?'Both timeframes line up — gives me more confidence.':'Short-term and big picture don\'t match — staying cautious.'));
+      pts.push('Zooming out (15-min): '+htfDir+'. '+(agree1m?'Everything lines up — that\'s a good sign.':'Short and long-term disagree — keeping it cautious.'));
     }else{
-      pts.push('Bigger picture (15-min): '+htfDir+' in a '+htfReg+' market. '+(agree1m?'All timeframes agree — stronger signal.':'Timeframes disagree — signal is weaker.'));
+      pts.push('Zooming out (15-min): '+htfDir+' in a '+htfReg+' market. '+(agree1m?'Timeframes agree — stronger setup.':'Timeframes don\'t match — weaker signal.'));
     }
     if(i15.r14!==null)pts.push('15-min momentum: '+(i15.r14>60?'buyers pushing hard':i15.r14<40?'sellers in control':'neither side winning')+' (RSI '+i15.r14.toFixed(0)+').');
   }else{
-    pts.push('Still loading the bigger picture (15-min data)...');
+    pts.push('Still loading the bigger picture...');
   }
 
   // Final call
@@ -1716,19 +1715,18 @@ function genieText(){
     var confI=S.conf;
     var isBet=a.isBet;
     if(a.call==='ABOVE'){
-      pts.push((isBet?'BETTING':'LEANING')+' ABOVE — '+a.conf+'% sure. '+(isBet?'This looks like a real opportunity.':'Not confident enough to bet, but I think it\'s going up.'));
+      pts.push((isBet?'BETTING':'LEANING')+' ABOVE — '+a.conf+'% sure. '+(isBet?'This one\'s looking real solid. Let\'s get it.':'Not sure enough to bet yet, but I think it\'s headed up.'));
     }else{
-      pts.push((isBet?'BETTING':'LEANING')+' BELOW — '+a.conf+'% sure. '+(isBet?'This looks like a real opportunity.':'Not confident enough to bet, but I think it\'s going down.'));
+      pts.push((isBet?'BETTING':'LEANING')+' BELOW — '+a.conf+'% sure. '+(isBet?'This one\'s looking real solid. Let\'s get it.':'Not sure enough to bet yet, but I think it\'s headed down.'));
     }
-    // Show all mode decisions
     if(a.allModes){
       var am=a.allModes;
-      pts.push('All modes: Safe says '+am.safe.call+' ('+am.safe.conf+'%'+(am.safe.bet?', betting':'')+') | Balanced says '+am.balanced.call+' ('+am.balanced.conf+'%'+(am.balanced.bet?', betting':'')+') | Aggressive says '+am.aggressive.call+' ('+am.aggressive.conf+'%'+(am.aggressive.bet?', betting':'')+').');
+      pts.push('What each mode thinks: Safe says '+am.safe.call+' ('+am.safe.conf+'%'+(am.safe.bet?', betting':'')+') · Balanced says '+am.balanced.call+' ('+am.balanced.conf+'%'+(am.balanced.bet?', betting':'')+') · Aggressive says '+am.aggressive.call+' ('+am.aggressive.conf+'%'+(am.aggressive.bet?', betting':'')+').');
     }
-    if(S.risk.currentDD>0.05)pts.push('Heads up: you\'re down '+(S.risk.currentDD*100).toFixed(1)+'% this session — auto-reducing bet sizes to protect your bankroll.');
+    if(S.risk.currentDD>0.05)pts.push('Heads up — you\'re down '+(S.risk.currentDD*100).toFixed(1)+'% this sesh. Auto-scaling bets down to protect your bag.');
     if(a.modeConflict)pts.push('\u26A0\uFE0F '+a.modeConflict);
     if(a.sr&&a.sr.nearest){
-      pts.push('Key price level: '+(a.sr.nearest.type==='support'?'support':'resistance')+' at '+fmt$(a.sr.nearest.price,getCfg().priceDec)+' (tested '+a.sr.nearest.touches+'x) — '+(a.sr.nearest.type==='support'?'price tends to bounce here.':'price tends to stall here.'));
+      pts.push('Watch this level: '+(a.sr.nearest.type==='support'?'support':'resistance')+' at '+fmt$(a.sr.nearest.price,getCfg().priceDec)+' (bounced off it '+a.sr.nearest.touches+'x) — price likes to '+(a.sr.nearest.type==='support'?'bounce here.':'get stuck here.'));
     }
   }
 
@@ -2217,7 +2215,7 @@ function getBettingRecommendation(analysis,mode,bankroll){
   if(edge<=0||edge<prof.edgeThresh){
     result.decision='Hold';
     result.confidence=Math.round(clamp((1-Math.abs(edge)*10)*30,5,40));
-    result.reasoning=edge<=0?'The price looks fair right now — no clear bargain to buy.':'The edge is only '+(edge*100).toFixed(1)+'¢, which isn\'t enough for '+mode+' mode (needs '+(prof.edgeThresh*100).toFixed(0)+'¢+). Sit this one out.';
+    result.reasoning=edge<=0?'Price looks pretty fair rn — no real deal to grab here.':'The edge is only '+(edge*100).toFixed(1)+'¢, not enough for '+mode+' mode (needs '+(prof.edgeThresh*100).toFixed(0)+'¢+). Gonna sit this one out.';
     return result;
   }
 
@@ -2280,13 +2278,13 @@ function getBettingRecommendation(analysis,mode,bankroll){
   // --- Reasoning (plain English) ---
   var reasons=[];
   if(result.decision==='Buy'){
-    reasons.push('The market is selling this at '+(effectiveCost*100).toFixed(0)+'¢, but we think it should be '+(probForDir*100).toFixed(0)+'¢ — that\'s a '+(edge*100).toFixed(1)+'¢ discount.');
+    reasons.push('Market\'s got this at '+(effectiveCost*100).toFixed(0)+'¢ but we think it\'s worth '+(probForDir*100).toFixed(0)+'¢ — that\'s a '+(edge*100).toFixed(1)+'¢ deal.');
   }else{
-    reasons.push('We can sell this at '+(effectiveCost*100).toFixed(0)+'¢, but we think it\'s only worth '+(probForDir*100).toFixed(0)+'¢ — that\'s '+(edge*100).toFixed(1)+'¢ of profit baked in.');
+    reasons.push('We can sell at '+(effectiveCost*100).toFixed(0)+'¢ but it\'s really only worth '+(probForDir*100).toFixed(0)+'¢ — '+(edge*100).toFixed(1)+'¢ of free money basically.');
   }
-  if(hasKalshi)reasons.push('Market spread: '+Math.round(kalBid*100)+'¢ to '+Math.round(kalAsk*100)+'¢'+(spread>0.08?' (wide — use a limit order to save money).':'.'));
-  if(result.confidence<50)reasons.push('Confidence is low — keep the bet small or skip this one.');
-  else if(result.confidence>=75)reasons.push('High confidence setup.');
+  if(hasKalshi)reasons.push('Spread rn: '+Math.round(kalBid*100)+'¢ to '+Math.round(kalAsk*100)+'¢'+(spread>0.08?' (kinda wide — use a limit order so you don\'t overpay).':'.'));
+  if(result.confidence<50)reasons.push('Not super confident tho — keep it small or just skip.');
+  else if(result.confidence>=75)reasons.push('Feelin\' good about this one.');
   result.reasoning=reasons.join(' ');
 
   return result;
@@ -2550,9 +2548,9 @@ function render(){
     var rec=getBettingRecommendation(a,S.mode,bank);
     trEl.className='trade-rec '+(rec.decision==='Buy'?'buy-rec':rec.decision==='Sell'?'sell-rec':'hold-rec');
     var decEl=$('trDecision');
-    decEl.textContent=rec.decision==='Buy'?'BUY — price looks cheap':rec.decision==='Sell'?'SELL — price looks expensive':'HOLD — no clear edge';
+    decEl.textContent=rec.decision==='Buy'?'BUY — looks like a deal':rec.decision==='Sell'?'SELL — overpriced rn':'HOLD — nothin\' worth grabbing';
     decEl.className='tr-decision '+(rec.decision==='Buy'?'buy':rec.decision==='Sell'?'sell':'hold');
-    $('trConfidence').textContent='How sure: '+rec.confidence+'%';
+    $('trConfidence').textContent='Confidence: '+rec.confidence+'%';
     $('trLimit').textContent=rec.limitPrice!==null?(rec.limitPrice*100).toFixed(0)+'\u00a2':'--';
     $('trLimit').style.color=rec.decision==='Buy'?CL.g:rec.decision==='Sell'?CL.r:CL.t3;
     $('trMarket').textContent=rec.marketPrice!==null?(rec.marketPrice*100).toFixed(0)+'\u00a2':'N/A';
