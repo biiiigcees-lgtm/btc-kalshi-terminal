@@ -33,8 +33,13 @@ CREATE TABLE IF NOT EXISTS signal_log (
   signal_id UUID PRIMARY KEY,
   ts TIMESTAMPTZ NOT NULL,
   probability DOUBLE PRECISION NOT NULL,
+  calibrated_probability DOUBLE PRECISION,
+  calibration_method TEXT,
   confidence DOUBLE PRECISION NOT NULL,
   expected_value DOUBLE PRECISION NOT NULL,
+  baseline_random DOUBLE PRECISION,
+  baseline_momentum DOUBLE PRECISION,
+  baseline_moving_average DOUBLE PRECISION,
   action TEXT NOT NULL,
   regime TEXT,
   payload JSONB NOT NULL
@@ -46,8 +51,12 @@ CREATE TABLE IF NOT EXISTS trade_outcomes (
   trade_id UUID,
   resolved_at TIMESTAMPTZ NOT NULL,
   predicted_probability DOUBLE PRECISION NOT NULL,
+  calibrated_probability DOUBLE PRECISION,
   outcome INTEGER NOT NULL,
   brier DOUBLE PRECISION NOT NULL,
+  raw_brier DOUBLE PRECISION,
+  calibrated_brier DOUBLE PRECISION,
+  pnl DOUBLE PRECISION,
   payload JSONB NOT NULL
 );
 

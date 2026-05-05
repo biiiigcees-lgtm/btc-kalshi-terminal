@@ -176,6 +176,8 @@ services:
       COOLDOWN_AFTER_LOSS_TRADES: ${COOLDOWN_AFTER_LOSS_TRADES:-3}
       MAX_BACKTEST_PROJECTED_LOSS: ${MAX_BACKTEST_PROJECTED_LOSS:-800}
       COOLDOWN_MINUTES: ${COOLDOWN_MINUTES:-30}
+      DRAWDOWN_VELOCITY_LIMIT: ${DRAWDOWN_VELOCITY_LIMIT:-5}
+      MIN_CONFIDENCE: ${MIN_CONFIDENCE:-0.65}
     depends_on:
       redis:
         condition: service_healthy
@@ -218,6 +220,7 @@ services:
       NODE_ENV: development
       REDIS_URL: redis://redis:6379
       EVENT_CHANNEL: ${EVENT_CHANNEL:-trading_events}
+      REGIME_COOLDOWN_MS: ${REGIME_COOLDOWN_MS:-5000}
     depends_on:
       redis:
         condition: service_healthy
@@ -240,7 +243,13 @@ services:
       NODE_ENV: development
       REDIS_URL: redis://redis:6379
       EVENT_CHANNEL: ${EVENT_CHANNEL:-trading_events}
-      EV_THRESHOLD: ${EV_THRESHOLD:-2.5}
+      EV_THRESHOLD: ${EV_THRESHOLD:-0}
+      MIN_CONFIDENCE: ${MIN_CONFIDENCE:-0.65}
+      SIGNAL_DECAY_MIN_MS: ${SIGNAL_DECAY_MIN_MS:-30000}
+      SIGNAL_DECAY_MAX_MS: ${SIGNAL_DECAY_MAX_MS:-90000}
+      WEIGHT_SMOOTHING_ALPHA: ${WEIGHT_SMOOTHING_ALPHA:-0.2}
+      WEIGHT_PERF_DECAY: ${WEIGHT_PERF_DECAY:-0.9}
+      MIN_SHARPE_FOR_TRADING: ${MIN_SHARPE_FOR_TRADING:-0}
     depends_on:
       redis:
         condition: service_healthy
@@ -267,6 +276,7 @@ services:
       REDIS_URL: redis://redis:6379
       EVENT_CHANNEL: ${EVENT_CHANNEL:-trading_events}
       CALIBRATION_WINDOW: ${CALIBRATION_WINDOW:-2000}
+      MIN_CALIBRATION_SAMPLES: ${MIN_CALIBRATION_SAMPLES:-80}
     depends_on:
       redis:
         condition: service_healthy
@@ -293,6 +303,11 @@ services:
       REDIS_URL: redis://redis:6379
       EVENT_CHANNEL: ${EVENT_CHANNEL:-trading_events}
       EXECUTION_MODE: ${EXECUTION_MODE:-paper}
+      FILL_DELAY_MIN_MS: ${FILL_DELAY_MIN_MS:-1000}
+      FILL_DELAY_MAX_MS: ${FILL_DELAY_MAX_MS:-3000}
+      BASE_SLIPPAGE_BPS: ${BASE_SLIPPAGE_BPS:-2}
+      LIQUIDITY_IMPACT_BPS: ${LIQUIDITY_IMPACT_BPS:-20}
+      SPREAD_WIDENING_MULTIPLIER: ${SPREAD_WIDENING_MULTIPLIER:-0.4}
     depends_on:
       redis:
         condition: service_healthy
@@ -346,6 +361,11 @@ services:
       DATABASE_URL: ${DATABASE_URL:-postgresql://trader:trader@db:5432/btc}
       REDIS_URL: redis://redis:6379
       EVENT_CHANNEL: ${EVENT_CHANNEL:-trading_events}
+      VALIDATION_WINDOW: ${VALIDATION_WINDOW:-800}
+      MIN_VALIDATION_SAMPLES: ${MIN_VALIDATION_SAMPLES:-60}
+      DIVERGENCE_ALERT_THRESHOLD: ${DIVERGENCE_ALERT_THRESHOLD:-0.12}
+      MODEL_IMPROVEMENT_DELTA: ${MODEL_IMPROVEMENT_DELTA:-0.003}
+      MIN_SHARPE_FOR_DEPLOY: ${MIN_SHARPE_FOR_DEPLOY:-0}
     depends_on:
       redis:
         condition: service_healthy

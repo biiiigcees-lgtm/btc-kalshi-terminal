@@ -14,6 +14,7 @@ let lastFeature = null;
 let processedTicks = 0;
 
 const prices = [];
+const spreads = [];
 const MAX_POINTS = 90;
 
 function avg(nums) {
@@ -26,6 +27,12 @@ function std(nums) {
   const mean = avg(nums);
   const variance = avg(nums.map((n) => (n - mean) ** 2));
   return Math.sqrt(variance);
+}
+
+function windowAvg(values, size) {
+  if (!values.length) return 0;
+  const slice = values.slice(-size);
+  return avg(slice);
 }
 
 async function publish(eventType, payload) {
@@ -50,6 +57,11 @@ async function handleTick(payload) {
 
   prices.push(price);
   if (prices.length > MAX_POINTS) prices.shift();
+
+  const spreadBps = Number(payload.spread_bps || 4);
+  spreads.push(spreadBps);
+  if (spreads.length > MAX_POINTS) spreads.shift();
+
   processedTicks += 1;
 
   const start = prices[Math.max(0, prices.length - 30)] || price;
@@ -61,20 +73,29 @@ async function handleTick(payload) {
   }
 
   const shortVol = std(returns.slice(-30));
-  const spreadBps = Number(payload.spread_bps || 4);
+  const veryShortVol = std(returns.slice(-8));
   const liquidityThickness = Math.max(0, 1 - spreadBps / 20);
   const imbalance = Math.tanh(momentum * 35);
   const flowDirection = imbalance > 0.08 ? "BUY_AGG" : imbalance < -0.08 ? "SELL_AGG" : "NEUTRAL";
+  const maFast = windowAvg(prices, 10);
+  const maSlow = windowAvg(prices, 30);
+  const depthProxy = Math.max(0, Math.min(1, 1 - windowAvg(spreads, 10) / 30));
 
   lastFeature = {
     symbol: "BTC-USD",
     expiry: "15m",
     ts: payload.time || new Date().toISOString(),
     price,
+    spread_bps: spreadBps,
     momentum,
     imbalance,
+    ma_fast: maFast,
+    ma_slow: maSlow,
+    depth_proxy: depthProxy,
     liquidity_thickness: liquidityThickness,
     volatility: shortVol,
+    volatility_1_8s: veryShortVol,
+    volatility_30s: shortVol,
     volatility_state: classifyVolatility(shortVol),
     flow_direction: flowDirection,
   };

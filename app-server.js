@@ -148,6 +148,25 @@ app.get("/api/intelligence/latest", async (_req, res) => {
   });
 });
 
+app.get("/api/statistics/edge", async (_req, res) => {
+  const [calibration, validation, fills, risk] = await Promise.all([
+    fetchJsonWithTimeout(`${CALIBRATION_URL}/summary`),
+    fetchJsonWithTimeout(`${MLOPS_URL}/validation`),
+    fetchJsonWithTimeout(`${EXECUTION_URL}/fills?limit=50`),
+    fetchJsonWithTimeout(`${RISK_URL}/health`),
+  ]);
+
+  const ok = calibration.ok || validation.ok || fills.ok;
+  return res.status(ok ? 200 : 502).json({
+    ok,
+    generated_at: new Date().toISOString(),
+    calibration,
+    validation,
+    fills,
+    risk,
+  });
+});
+
 app.use(express.static(path.join(__dirname)));
 
 app.get("/", (_req, res) => {

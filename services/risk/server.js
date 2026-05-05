@@ -27,10 +27,16 @@ const MAX_EXPOSURE_PER_REGIME_PCT = Number.parseFloat(process.env.MAX_EXPOSURE_P
 const COOLDOWN_AFTER_LOSS_TRADES = Number.parseInt(process.env.COOLDOWN_AFTER_LOSS_TRADES || "3", 10);
 const MAX_BACKTEST_PROJECTED_LOSS = Number.parseFloat(process.env.MAX_BACKTEST_PROJECTED_LOSS || "800");
 const COOLDOWN_MINUTES = Number.parseInt(process.env.COOLDOWN_MINUTES || "30", 10);
+const DRAWDOWN_VELOCITY_LIMIT = Number.parseFloat(process.env.DRAWDOWN_VELOCITY_LIMIT || "5");
+const MIN_CONFIDENCE = Number.parseFloat(process.env.MIN_CONFIDENCE || "0.65");
 
 const MAX_LOSS_PER_TRADE = (MAX_TRADE_RISK_PCT / 100) * NOTIONAL_BANKROLL;
 const MAX_DAILY_LOSS = (MAX_DAILY_LOSS_PCT / 100) * NOTIONAL_BANKROLL;
 const MAX_DRAWDOWN = (MAX_DRAWDOWN_PCT / 100) * NOTIONAL_BANKROLL;
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
 
 async function initDb() {
   if (!pool) {
@@ -111,9 +117,54 @@ async function getRiskState() {
     `
   );
 
+  let drawdownVelocity = 0;
+  let pnlVolatility = 0;
+
+  try {
+    const recentRead = await pool.query(
+      `
+        SELECT
+          resolved_at,
+          COALESCE(pnl, (payload->>'pnl')::DOUBLE PRECISION, 0) AS pnl
+        FROM trade_outcomes
+        ORDER BY resolved_at DESC
+        LIMIT 40;
+      `
+    );
+
+    const recentRows = [...recentRead.rows].reverse();
+    if (recentRows.length >= 2) {
+      let cumulative = 0;
+      let peak = 0;
+      const drawdowns = [];
+      const pnls = [];
+
+      for (const row of recentRows) {
+        const pnl = Number(row.pnl || 0);
+        pnls.push(pnl);
+        cumulative += pnl;
+        peak = Math.max(peak, cumulative);
+        drawdowns.push(peak - cumulative);
+      }
+
+      const firstTs = new Date(recentRows[0].resolved_at).getTime();
+      const lastTs = new Date(recentRows[recentRows.length - 1].resolved_at).getTime();
+      const minutes = Math.max(1, (lastTs - firstTs) / 60000);
+      drawdownVelocity = (drawdowns[drawdowns.length - 1] - drawdowns[0]) / minutes;
+
+      const mean = pnls.reduce((acc, v) => acc + v, 0) / pnls.length;
+      const variance = pnls.reduce((acc, v) => acc + (v - mean) ** 2, 0) / pnls.length;
+      pnlVolatility = Math.sqrt(variance);
+    }
+  } catch (_error) {
+    // trade_outcomes may not exist yet on early startup
+  }
+
   return {
     dailyRealizedPnl: Number(dailyRead.rows[0]?.daily_realized_pnl || 0),
     maxDrawdown: Number(drawdownRead.rows[0]?.max_drawdown || 0),
+    drawdownVelocity,
+    pnlVolatility,
   };
 }
 
@@ -171,17 +222,42 @@ function evaluateDecision(input, state) {
   const reasons = [];
   const confidence = Number(input.confidence || 0);
   const cost = Number(input.cost || 0);
+  const volatility = Number(input.feature_snapshot?.volatility || 0);
+  const liquidity = Number(input.feature_snapshot?.liquidity_thickness || 0.5);
   const regime = String(input.regime || "unknown");
   const exposureForRegime = Number(regimeExposure[regime] || 0);
   const exposurePct = (exposureForRegime / NOTIONAL_BANKROLL) * 100;
 
+  const volatilityMultiplier = clamp(1 - volatility * 180, 0.25, 1);
+  const liquidityMultiplier = clamp(0.4 + liquidity * 0.8, 0.35, 1);
+  const streakMultiplier = clamp(1 - lossStreak * 0.15, 0.35, 1);
+  const drawdownVelocityMultiplier = state.drawdownVelocity > DRAWDOWN_VELOCITY_LIMIT ? 0.45 : 1;
+  const sizeMultiplier = clamp(
+    volatilityMultiplier * liquidityMultiplier * streakMultiplier * drawdownVelocityMultiplier,
+    0.2,
+    1
+  );
+  const adjustedCost = cost * sizeMultiplier;
+
   if (isCooldownActive()) {
     reasons.push("cooldown active");
   }
-  if (cost > MAX_LOSS_PER_TRADE) {
-    reasons.push("trade cost exceeds max loss per trade");
+  if (adjustedCost > MAX_LOSS_PER_TRADE) {
+    reasons.push("volatility-adjusted risk exceeds max trade risk");
   }
-  if (confidence < 0.65) {
+  if (!Boolean(input.calibration_ready)) {
+    reasons.push("calibration gate failed");
+  }
+  if (!Boolean(input.regime_match)) {
+    reasons.push("regime match required");
+  }
+  if (!Boolean(input.validation_approved)) {
+    reasons.push("validation gate failed");
+  }
+  if (!Boolean(input.baseline_gate_pass)) {
+    reasons.push("baseline comparison gate failed");
+  }
+  if (confidence < MIN_CONFIDENCE) {
     reasons.push("confidence below hard threshold");
   }
   if (lossStreak >= COOLDOWN_AFTER_LOSS_TRADES) {
@@ -193,6 +269,12 @@ function evaluateDecision(input, state) {
   if (state.maxDrawdown >= MAX_DRAWDOWN) {
     reasons.push("max drawdown limit reached");
   }
+  if (state.drawdownVelocity > DRAWDOWN_VELOCITY_LIMIT && state.dailyRealizedPnl < 0) {
+    reasons.push("drawdown velocity kill-switch active");
+  }
+  if (volatility > 0.003 && lossStreak >= 2) {
+    reasons.push("volatility spike with loss streak");
+  }
   if (exposurePct >= MAX_EXPOSURE_PER_REGIME_PCT) {
     reasons.push("max exposure per regime reached");
   }
@@ -201,7 +283,19 @@ function evaluateDecision(input, state) {
     triggerCooldown();
   }
 
-  return reasons;
+  return {
+    reasons,
+    sizeMultiplier,
+    adjustedCost,
+    riskDiagnostics: {
+      volatilityMultiplier,
+      liquidityMultiplier,
+      streakMultiplier,
+      drawdownVelocityMultiplier,
+      drawdownVelocity: state.drawdownVelocity,
+      pnlVolatility: state.pnlVolatility,
+    },
+  };
 }
 
 async function publish(eventType, payload) {
@@ -227,6 +321,13 @@ async function startEventLoop() {
       const evt = JSON.parse(raw);
       if (evt.event_type === "trade_resolved") {
         const pnl = Number(evt.payload?.pnl || 0);
+        const regime = String(evt.payload?.regime || "unknown");
+        const exposureRelease = Number(evt.payload?.adjusted_cost || evt.payload?.cost || 0);
+
+        if (regimeExposure[regime]) {
+          regimeExposure[regime] = Math.max(0, Number(regimeExposure[regime] || 0) - exposureRelease);
+        }
+
         if (pnl < 0) {
           lossStreak += 1;
         } else {
@@ -245,21 +346,30 @@ async function startEventLoop() {
 
       const state = await getRiskState();
       const decision = evt.payload || {};
-      const reasons = evaluateDecision(decision, state);
-      const allow = reasons.length === 0;
+      const evaluation = evaluateDecision(decision, state);
+      const allow = evaluation.reasons.length === 0;
+
+      const decisionWithSizing = {
+        ...decision,
+        size_multiplier: evaluation.sizeMultiplier,
+        adjusted_cost: evaluation.adjustedCost,
+      };
 
       if (allow) {
         const regime = String(decision.regime || "unknown");
-        regimeExposure[regime] = Number(regimeExposure[regime] || 0) + Number(decision.cost || 0);
+        regimeExposure[regime] = Number(regimeExposure[regime] || 0) + Number(evaluation.adjustedCost || 0);
       }
 
       await publish("risk_update", {
         allow,
-        reasons,
-        decision,
+        reasons: evaluation.reasons,
+        decision: decisionWithSizing,
+        risk_diagnostics: evaluation.riskDiagnostics,
         state: {
           dailyRealizedPnl: state.dailyRealizedPnl,
           maxDrawdown: state.maxDrawdown,
+          drawdownVelocity: state.drawdownVelocity,
+          pnlVolatility: state.pnlVolatility,
           lossStreak,
           regimeExposure,
           cooldownActive: isCooldownActive(),
@@ -306,6 +416,8 @@ app.post("/evaluate", async (req, res) => {
         maxLossPerTrade: MAX_LOSS_PER_TRADE,
         maxDailyLoss: MAX_DAILY_LOSS,
         maxDrawdown: MAX_DRAWDOWN,
+        drawdownVelocityLimit: DRAWDOWN_VELOCITY_LIMIT,
+        minConfidence: MIN_CONFIDENCE,
         maxTradeRiskPct: MAX_TRADE_RISK_PCT,
         maxDailyLossPct: MAX_DAILY_LOSS_PCT,
         maxDrawdownPct: MAX_DRAWDOWN_PCT,
@@ -318,6 +430,8 @@ app.post("/evaluate", async (req, res) => {
       state: {
         dailyRealizedPnl: state.dailyRealizedPnl,
         maxDrawdown: state.maxDrawdown,
+        drawdownVelocity: state.drawdownVelocity,
+        pnlVolatility: state.pnlVolatility,
         lossStreak,
         regimeExposure,
         cooldownActive: isCooldownActive(),

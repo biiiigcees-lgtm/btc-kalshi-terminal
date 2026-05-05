@@ -38,8 +38,8 @@ async function resolveTrade(fill) {
   if (!pool || !dbReady) return;
 
   const nowPrice = Number(latestTick?.price || 0);
-  const base = Number(fill.fill_price || fill.cost || 50);
-  const simulatedMove = (nowPrice || base) - base;
+  const entryPrice = Number(fill.entry_price || fill.feature_snapshot?.price || nowPrice || 0);
+  const simulatedMove = (nowPrice || entryPrice) - entryPrice;
   const bullishCall = fill.action === "LONG" || fill.action === "SCALE_UP";
   const bearishCall = fill.action === "SHORT" || fill.action === "SCALE_DOWN";
   const outcome = bullishCall ? simulatedMove >= 0 : bearishCall ? simulatedMove <= 0 : false;
@@ -47,7 +47,8 @@ async function resolveTrade(fill) {
   const payout = outcome ? 100 : 0;
   await pool.query(`UPDATE paper_trades SET outcome = $1, payout = $2 WHERE id = $3;`, [outcome, payout, fill.trade_id]);
 
-  const pnl = outcome ? payout - Number(fill.cost || 0) : -Number(fill.cost || 0);
+  const tradeCost = Number(fill.fill_price || fill.adjusted_cost || fill.cost || 0);
+  const pnl = outcome ? payout - tradeCost : -tradeCost;
   resolvedCount += 1;
 
   await publish("trade_resolved", {
@@ -55,8 +56,22 @@ async function resolveTrade(fill) {
     signal_id: fill.signal_id,
     decision_id: fill.decision_id,
     probability: Number(fill.probability || 0.5),
+    raw_probability: Number(fill.raw_probability || fill.probability || 0.5),
+    calibrated_probability: Number(fill.calibrated_probability || fill.probability || 0.5),
     outcome,
     pnl,
+    cost: Number(fill.cost || 0),
+    adjusted_cost: Number(fill.adjusted_cost || fill.cost || 0),
+    fill_price: Number(fill.fill_price || fill.cost || 0),
+    regime: fill.regime || "unknown",
+    action: fill.action || "HOLD",
+    baseline: fill.baseline || {},
+    model_scores: fill.model_scores || {},
+    weights: fill.weights || {},
+    latency_ms: Number(fill.latency_ms || 0),
+    slippage_bps: Number(fill.slippage_bps || 0),
+    spread_widening_bps: Number(fill.spread_widening_bps || 0),
+    liquidity_impact_bps: Number(fill.liquidity_impact_bps || 0),
     resolved_at: new Date().toISOString(),
   });
 }
