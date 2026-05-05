@@ -78,6 +78,36 @@ body{
 .dot.stale{background:var(--y);box-shadow:0 0 8px rgba(255,193,7,0.3);animation:pulse 1s ease-in-out infinite}
 .dot.off{background:var(--r);box-shadow:0 0 8px rgba(255,59,92,0.3)}
 .hdr-time{font-size:10px;color:var(--t4);font-variant-numeric:tabular-nums;font-weight:500}
+.hdr-r{display:flex;align-items:center;gap:8px}
+.combo-btn{
+  border:1px solid rgba(86,212,245,0.24);background:rgba(86,212,245,0.08);color:var(--b);
+  border-radius:999px;padding:7px 12px;font-size:9px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;
+  cursor:pointer;transition:all .25s;font-family:inherit
+}
+.combo-btn:hover{background:rgba(86,212,245,0.14);box-shadow:0 0 12px rgba(86,212,245,0.14)}
+
+/* === COMBINED V2 OVERLAY === */
+.v2-overlay{
+  position:fixed;inset:0;z-index:9999;background:#030810;
+  display:none;flex-direction:column
+}
+.v2-overlay.active{display:flex}
+.v2-top{
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:10px 12px;background:rgba(8,14,26,0.94);border-bottom:1px solid rgba(80,110,170,0.2)
+}
+.v2-top-lbl{font-size:9px;font-weight:700;letter-spacing:.14em;color:var(--t2);text-transform:uppercase}
+.v2-actions{display:flex;align-items:center;gap:8px}
+.v2-open,
+.v2-back{
+  border:1px solid rgba(86,212,245,0.22);background:rgba(18,28,46,0.88);color:var(--b);
+  border-radius:999px;padding:7px 11px;font-size:9px;font-weight:700;letter-spacing:.08em;text-decoration:none;
+  cursor:pointer;transition:all .2s;font-family:inherit
+}
+.v2-open:hover,.v2-back:hover{background:rgba(26,40,64,0.95)}
+.v2-back{border-color:rgba(255,255,255,0.16);color:var(--t1)}
+.v2-frame-wrap{flex:1;min-height:0;background:#050a12}
+.v2-frame{width:100%;height:100%;border:0;background:#050a12}
 
 /* === PRICE === */
 .p-big{font-size:32px;font-weight:900;color:var(--t1);font-variant-numeric:tabular-nums;letter-spacing:-.5px;transition:color .3s}
@@ -428,6 +458,8 @@ body{
 @media(max-width:480px){
   .sec{padding:8px 6px;margin:3px 6px}
   .hdr{padding:10px 10px;margin:4px 6px}
+  .hdr-r{gap:6px}
+  .combo-btn{padding:6px 9px;font-size:8px;letter-spacing:.08em}
   .chart-wrap{margin:4px 6px}
   .chart-wrap canvas{height:140px}
   .coin-tabs{margin:4px 6px;padding:3px;gap:2px}
@@ -469,6 +501,11 @@ body{
   .mode-btn{font-size:9px;padding:6px 4px}
   .mode-desc{font-size:8px}
   .ftr{font-size:6px;padding:6px}
+
+  .v2-top{padding:8px 8px}
+  .v2-top-lbl{font-size:8px}
+  .v2-actions{gap:6px}
+  .v2-open,.v2-back{padding:6px 8px;font-size:8px}
 }
 </style>
 </head>
@@ -477,7 +514,23 @@ body{
 
 <div class="hdr">
   <div class="hdr-l"><div class="dot off" id="dot"></div><div class="hdr-t" id="hdrTitle">BTC TERMINAL PRO</div></div>
-  <div class="hdr-time" id="clock">--:--:--</div>
+  <div class="hdr-r">
+    <button class="combo-btn" id="openV2Btn" type="button">V2 Console</button>
+    <div class="hdr-time" id="clock">--:--:--</div>
+  </div>
+</div>
+
+<div class="v2-overlay" id="v2Overlay" aria-hidden="true">
+  <div class="v2-top">
+    <div class="v2-top-lbl">Combined Mode · BTC Terminal V2</div>
+    <div class="v2-actions">
+      <a class="v2-open" href="https://btc-terminal-v2.vercel.app" target="_blank" rel="noopener">Open Tab</a>
+      <button class="v2-back" id="closeV2Btn" type="button">Back to Pro</button>
+    </div>
+  </div>
+  <div class="v2-frame-wrap">
+    <iframe class="v2-frame" id="v2Frame" title="BTC Terminal V2" loading="lazy" referrerpolicy="strict-origin-when-cross-origin"></iframe>
+  </div>
 </div>
 
 <div class="coin-tabs" id="coinTabs">
@@ -3182,9 +3235,35 @@ function restoreState(){
   }catch(e){}
 }
 
+var V2_URL='https://btc-terminal-v2.vercel.app';
+function openV2Console(){
+  var overlay=$('v2Overlay'),frame=$('v2Frame');
+  if(!overlay||!frame)return;
+  if(!frame.src)frame.src=V2_URL;
+  overlay.classList.add('active');
+  overlay.setAttribute('aria-hidden','false');
+  document.body.style.overflow='hidden';
+}
+function closeV2Console(){
+  var overlay=$('v2Overlay');
+  if(!overlay)return;
+  overlay.classList.remove('active');
+  overlay.setAttribute('aria-hidden','true');
+  document.body.style.overflow='';
+}
+function bindCombinedMode(){
+  var openBtn=$('openV2Btn'),closeBtn=$('closeV2Btn');
+  if(openBtn)openBtn.addEventListener('click',openV2Console);
+  if(closeBtn)closeBtn.addEventListener('click',closeV2Console);
+  document.addEventListener('keydown',function(e){
+    if(e.key==='Escape')closeV2Console();
+  });
+}
+
 /* ======== INIT ======== */
 function init(){
   restoreState();
+  bindCombinedMode();
   updateTabUI();updateLabels();
   setupChart();chartLoop();
   window.addEventListener('resize',function(){setupChart()});
