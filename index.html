@@ -86,28 +86,29 @@ body{
 }
 .combo-btn:hover{background:rgba(86,212,245,0.14);box-shadow:0 0 12px rgba(86,212,245,0.14)}
 
-/* === COMBINED V2 OVERLAY === */
-.v2-overlay{
-  position:fixed;inset:0;z-index:9999;background:#030810;
-  display:none;flex-direction:column
+/* === MERGED V2 LAYOUT SHELL === */
+.combo-shell{display:grid;grid-template-columns:240px 1fr;gap:8px;padding:0 10px 10px}
+.combo-sidebar{padding:12px;height:calc(100vh - 30px);position:sticky;top:6px;overflow:auto}
+.combo-nav{display:grid;gap:6px}
+.combo-nav-btn{
+  border:1px solid rgba(70,100,155,0.16);background:rgba(14,22,40,0.45);color:var(--t2);
+  border-radius:10px;padding:9px 10px;font-size:9px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
+  text-align:left;cursor:pointer;transition:all .2s;font-family:inherit
 }
-.v2-overlay.active{display:flex}
-.v2-top{
-  display:flex;align-items:center;justify-content:space-between;gap:10px;
-  padding:10px 12px;background:rgba(8,14,26,0.94);border-bottom:1px solid rgba(80,110,170,0.2)
+.combo-nav-btn:hover{background:rgba(20,34,58,0.6)}
+.combo-nav-btn.active{border-color:rgba(86,212,245,0.24);background:rgba(86,212,245,0.08);color:var(--b)}
+.quick-grid{display:grid;gap:6px}
+.quick-card{padding:8px 9px;border-radius:10px;background:rgba(14,22,40,0.52);border:1px solid rgba(70,100,155,0.14)}
+.quick-l{font-size:7px;letter-spacing:.1em;color:var(--t4);font-weight:700;text-transform:uppercase}
+.quick-v{font-size:14px;color:var(--t1);font-weight:800;font-variant-numeric:tabular-nums;margin-top:4px}
+.quick-s{font-size:8px;color:var(--t3);margin-top:2px}
+.combo-main{min-width:0}
+.feed-bar{
+  margin:6px 12px;padding:8px 12px;display:flex;align-items:center;gap:14px;overflow-x:auto;
+  background:rgba(10,18,32,0.6);border:1px solid rgba(70,100,155,0.18);border-radius:12px;
+  -webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);font-size:9px;letter-spacing:.08em;white-space:nowrap
 }
-.v2-top-lbl{font-size:9px;font-weight:700;letter-spacing:.14em;color:var(--t2);text-transform:uppercase}
-.v2-actions{display:flex;align-items:center;gap:8px}
-.v2-open,
-.v2-back{
-  border:1px solid rgba(86,212,245,0.22);background:rgba(18,28,46,0.88);color:var(--b);
-  border-radius:999px;padding:7px 11px;font-size:9px;font-weight:700;letter-spacing:.08em;text-decoration:none;
-  cursor:pointer;transition:all .2s;font-family:inherit
-}
-.v2-open:hover,.v2-back:hover{background:rgba(26,40,64,0.95)}
-.v2-back{border-color:rgba(255,255,255,0.16);color:var(--t1)}
-.v2-frame-wrap{flex:1;min-height:0;background:#050a12}
-.v2-frame{width:100%;height:100%;border:0;background:#050a12}
+.mobile-nav{display:none}
 
 /* === PRICE === */
 .p-big{font-size:32px;font-weight:900;color:var(--t1);font-variant-numeric:tabular-nums;letter-spacing:-.5px;transition:color .3s}
@@ -450,6 +451,20 @@ body{
 
 /* === MOBILE RESPONSIVE === */
 @media(max-width:768px){
+  .combo-shell{grid-template-columns:1fr;padding:0 6px 64px}
+  .combo-sidebar{display:none}
+  .mobile-nav{
+    display:grid;grid-template-columns:repeat(6,1fr);gap:4px;
+    position:fixed;left:6px;right:6px;bottom:6px;z-index:120;
+    padding:6px;background:rgba(10,16,30,0.9);border:1px solid rgba(70,100,155,0.2);
+    border-radius:12px;-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px)
+  }
+  .mobile-nav-btn{
+    border:1px solid transparent;background:transparent;color:var(--t3);
+    border-radius:8px;padding:6px 4px;font-size:8px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
+    cursor:pointer;font-family:inherit
+  }
+  .mobile-nav-btn.active{color:var(--b);border-color:rgba(86,212,245,0.24);background:rgba(86,212,245,0.08)}
   .paired-row{grid-template-columns:1fr;margin:0 6px}
   .stats-modes-row{grid-template-columns:1fr}
   .stats-modes-row .session-stats{grid-template-columns:repeat(4,1fr)}
@@ -501,11 +516,7 @@ body{
   .mode-btn{font-size:9px;padding:6px 4px}
   .mode-desc{font-size:8px}
   .ftr{font-size:6px;padding:6px}
-
-  .v2-top{padding:8px 8px}
-  .v2-top-lbl{font-size:8px}
-  .v2-actions{gap:6px}
-  .v2-open,.v2-back{padding:6px 8px;font-size:8px}
+  .feed-bar{margin:4px 6px;padding:7px 8px;font-size:8px;gap:10px}
 }
 </style>
 </head>
@@ -515,24 +526,57 @@ body{
 <div class="hdr">
   <div class="hdr-l"><div class="dot off" id="dot"></div><div class="hdr-t" id="hdrTitle">BTC TERMINAL PRO</div></div>
   <div class="hdr-r">
-    <button class="combo-btn" id="openV2Btn" type="button">V2 Console</button>
+    <a class="combo-btn" href="https://btc-terminal-v2.vercel.app" target="_blank" rel="noopener">Legacy V2</a>
     <div class="hdr-time" id="clock">--:--:--</div>
   </div>
 </div>
 
-<div class="v2-overlay" id="v2Overlay" aria-hidden="true">
-  <div class="v2-top">
-    <div class="v2-top-lbl">Combined Mode · BTC Terminal V2</div>
-    <div class="v2-actions">
-      <a class="v2-open" href="https://btc-terminal-v2.vercel.app" target="_blank" rel="noopener">Open Tab</a>
-      <button class="v2-back" id="closeV2Btn" type="button">Back to Pro</button>
+<div class="combo-shell">
+  <aside class="combo-sidebar glass">
+    <div class="stl">Navigation</div>
+    <nav class="combo-nav" id="comboNav">
+      <button class="combo-nav-btn active" data-go="overviewSection" type="button">Overview</button>
+      <button class="combo-nav-btn" data-go="kalshiSection" type="button">Kalshi</button>
+      <button class="combo-nav-btn" data-go="consensusSection" type="button">Consensus</button>
+      <button class="combo-nav-btn" data-go="plannerSection" type="button">Planner</button>
+      <button class="combo-nav-btn" data-go="logsSection" type="button">Logs</button>
+      <button class="combo-nav-btn" data-go="alertsSection" type="button">Alerts</button>
+    </nav>
+
+    <div class="stl" style="margin-top:12px">Quick Stats</div>
+    <div class="quick-grid">
+      <div class="quick-card">
+        <div class="quick-l">Fear &amp; Greed</div>
+        <div class="quick-v" id="qFear">50</div>
+        <div class="quick-s" id="qFearLbl">Neutral</div>
+      </div>
+      <div class="quick-card">
+        <div class="quick-l">Halving Days</div>
+        <div class="quick-v" id="qHalving">--</div>
+        <div class="quick-s">Target 2028 cycle</div>
+      </div>
+      <div class="quick-card">
+        <div class="quick-l">Signal Badge</div>
+        <div class="quick-v" id="qSignal">WAIT 50</div>
+      </div>
+      <div class="quick-card">
+        <div class="quick-l">Session Win</div>
+        <div class="quick-v" id="qWin">--%</div>
+      </div>
     </div>
-  </div>
-  <div class="v2-frame-wrap">
-    <iframe class="v2-frame" id="v2Frame" title="BTC Terminal V2" loading="lazy" referrerpolicy="strict-origin-when-cross-origin"></iframe>
-  </div>
+  </aside>
+
+  <main class="combo-main">
+<div class="feed-bar" id="feedBar">
+  <span style="color:var(--t4)">FEEDS ·</span>
+  <span style="color:var(--t4)" id="fdBinance">BINANCE —</span>
+  <span style="color:var(--t4)" id="fdCoinbase">COINBASE —</span>
+  <span style="color:var(--t4)" id="fdKraken">KRAKEN —</span>
+  <span style="margin-left:auto;color:var(--b)" id="fdAgg">AGG · —</span>
+  <span style="color:var(--t3)" id="fdUpd">UPD · --:--:--</span>
 </div>
 
+<section id="overviewSection">
 <div class="coin-tabs" id="coinTabs">
   <button class="coin-tab active" data-coin="BTC" onclick="switchCoin('BTC')">BTC</button>
   <button class="coin-tab" data-coin="ETH" onclick="switchCoin('ETH')">ETH</button>
@@ -558,14 +602,15 @@ body{
   <div class="chart-label" id="chartLabel">BTC/USD · LIVE</div>
   <canvas id="chart"></canvas>
 </div>
+</section>
 
-<div class="sec glass">
+<div class="sec glass" id="kalshiSection">
   <div class="tm-row"><span class="stl" style="margin:0">KALSHI 15-MIN ROUND</span><span class="tm-val" id="tmVal">--:--</span></div>
   <div class="tm-bar-w"><div class="tm-bar" id="tmBar" style="width:0%"></div></div>
   <div class="tm-row"><span class="tm-phase" id="tmPhase">--</span><span class="tm-strike" id="tmStrike">Strike: --</span></div>
 </div>
 
-<div class="dual-panel">
+<section id="consensusSection" class="dual-panel">
 <div class="sig scanning" id="sigCard">
   <div class="sig-lbl">GENIE AI — ELITE SIGNAL ENGINE</div>
   <div class="sig-dir" id="sigDir">ANALYZING</div>
@@ -602,11 +647,11 @@ body{
     <div class="tr-reasoning" id="trReasoning">Waiting for market data...</div>
   </div>
 </div>
-</div>
+</section>
 
 <div class="lock" id="lockBnr"></div>
 
-<div class="pos-card">
+<div class="pos-card" id="plannerSection">
   <div class="stl">YOUR POSITION</div>
   <div class="pos-grid">
     <div class="pos-item"><label>PRICE TARGET ($)</label><input type="number" id="inTarget" placeholder="Auto-detect"></div>
@@ -668,7 +713,7 @@ body{
   </div>
 </div>
 
-<div class="paired-row">
+<div class="paired-row" id="logsSection">
 <div class="sec glass">
   <div class="stl">GENIE ANALYSIS</div>
   <div class="genie-snap" id="genieSnap">
@@ -687,7 +732,7 @@ body{
 </div>
 </div>
 
-<div class="paired-row">
+<div class="paired-row" id="alertsSection">
 <div class="sec glass">
   <div class="stl">TECHNICAL INDICATORS</div>
   <div class="ind-grid">
@@ -713,6 +758,17 @@ body{
 </div>
 
 <div class="ftr">Live data · Composite Price (Coinbase + Kraken) · Funding Rate · Kalshi Market · GENIE v6.0</div>
+</main>
+</div>
+
+<nav class="mobile-nav" id="mobileNav">
+  <button class="mobile-nav-btn active" data-go="overviewSection" type="button">Overview</button>
+  <button class="mobile-nav-btn" data-go="kalshiSection" type="button">Kalshi</button>
+  <button class="mobile-nav-btn" data-go="consensusSection" type="button">Consensus</button>
+  <button class="mobile-nav-btn" data-go="plannerSection" type="button">Planner</button>
+  <button class="mobile-nav-btn" data-go="logsSection" type="button">Logs</button>
+  <button class="mobile-nav-btn" data-go="alertsSection" type="button">Alerts</button>
+</nav>
 </div>
 
 <script>
@@ -2479,6 +2535,38 @@ function render(){
   $('dot').className='dot '+((S.connected||S.price)?(_priceTs&&Date.now()-_priceTs>10000?'stale':'on'):'off');
   $('clock').textContent=ts();
 
+  // Feed strip + quick stats
+  var feedDec=getCfg().priceDec;
+  $('fdBinance').textContent='BINANCE '+(_priceSources.binance?fmt$(_priceSources.binance,feedDec):'—');
+  $('fdCoinbase').textContent='COINBASE '+(_priceSources.coinbase?fmt$(_priceSources.coinbase,feedDec):'—');
+  $('fdKraken').textContent='KRAKEN '+(_priceSources.kraken?fmt$(_priceSources.kraken,feedDec):'—');
+  $('fdAgg').textContent='AGG · '+(p?fmt$(p,feedDec):'—');
+  var upd='--:--:--';
+  if(_priceTs){
+    var ud=new Date(_priceTs);
+    upd=String(ud.getHours()).padStart(2,'0')+':'+String(ud.getMinutes()).padStart(2,'0')+':'+String(ud.getSeconds()).padStart(2,'0');
+  }
+  $('fdUpd').textContent='UPD · '+upd;
+
+  var fg=50,fgLbl='Neutral';
+  if(ind&&ind.r14!==null){
+    fg=Math.round(clamp(ind.r14,0,100));
+    fgLbl=fg>=65?'Greed':fg<=35?'Fear':'Neutral';
+  }
+  $('qFear').textContent=fg;
+  $('qFear').style.color=fg>=65?CL.g:fg<=35?CL.r:CL.y;
+  $('qFearLbl').textContent=fgLbl;
+  var halvingTs=Date.UTC(2028,3,20,0,0,0);
+  var daysToHalving=Math.max(0,Math.ceil((halvingTs-Date.now())/86400000));
+  $('qHalving').textContent=String(daysToHalving);
+  if(a){
+    $('qSignal').textContent=a.call+' '+a.conf;
+    $('qSignal').style.color=a.call==='ABOVE'?CL.g:CL.r;
+  }else{
+    $('qSignal').textContent='WAIT 50';
+    $('qSignal').style.color=CL.t3;
+  }
+
   // Price
   if(p){
     var dec=getCfg().priceDec;
@@ -2686,6 +2774,8 @@ function render(){
   $('ssBets').textContent=S.risk.sessionBets;
   $('ssDd').textContent=(S.risk.currentDD*100).toFixed(1)+'%';
   $('ssDd').style.color=S.risk.currentDD>0.1?CL.r:S.risk.currentDD>0.05?CL.o:CL.t2;
+  $('qWin').textContent=S.risk.sessionBets>0?wr+'%':'--%';
+  $('qWin').style.color=wr>=50?CL.g:wr>0?CL.r:CL.t3;
 
   // Trade Recommendation Panel
   var trEl=$('tradeRec');
@@ -3235,35 +3325,52 @@ function restoreState(){
   }catch(e){}
 }
 
-var V2_URL='https://btc-terminal-v2.vercel.app';
-function openV2Console(){
-  var overlay=$('v2Overlay'),frame=$('v2Frame');
-  if(!overlay||!frame)return;
-  if(!frame.src)frame.src=V2_URL;
-  overlay.classList.add('active');
-  overlay.setAttribute('aria-hidden','false');
-  document.body.style.overflow='hidden';
+function setNavActive(sectionId){
+  var btns=document.querySelectorAll('.combo-nav-btn,.mobile-nav-btn');
+  for(var i=0;i<btns.length;i++){
+    btns[i].classList.toggle('active',btns[i].getAttribute('data-go')===sectionId);
+  }
 }
-function closeV2Console(){
-  var overlay=$('v2Overlay');
-  if(!overlay)return;
-  overlay.classList.remove('active');
-  overlay.setAttribute('aria-hidden','true');
-  document.body.style.overflow='';
+function goToSection(sectionId){
+  var el=$(sectionId);
+  if(!el)return;
+  setNavActive(sectionId);
+  el.scrollIntoView({behavior:'smooth',block:'start'});
 }
-function bindCombinedMode(){
-  var openBtn=$('openV2Btn'),closeBtn=$('closeV2Btn');
-  if(openBtn)openBtn.addEventListener('click',openV2Console);
-  if(closeBtn)closeBtn.addEventListener('click',closeV2Console);
-  document.addEventListener('keydown',function(e){
-    if(e.key==='Escape')closeV2Console();
-  });
+function bindMergedNav(){
+  var btns=document.querySelectorAll('.combo-nav-btn,.mobile-nav-btn');
+  for(var i=0;i<btns.length;i++){
+    btns[i].addEventListener('click',function(e){
+      var target=e.currentTarget.getAttribute('data-go');
+      if(target)goToSection(target);
+    });
+  }
+
+  if(!('IntersectionObserver' in window))return;
+  var sectionIds=['overviewSection','kalshiSection','consensusSection','plannerSection','logsSection','alertsSection'];
+  var sections=[];
+  for(var si=0;si<sectionIds.length;si++){
+    var sec=$(sectionIds[si]);
+    if(sec)sections.push(sec);
+  }
+  if(!sections.length)return;
+
+  var observer=new IntersectionObserver(function(entries){
+    var best=null;
+    for(var i=0;i<entries.length;i++){
+      if(!entries[i].isIntersecting)continue;
+      if(!best||entries[i].intersectionRatio>best.intersectionRatio)best=entries[i];
+    }
+    if(best&&best.target&&best.target.id)setNavActive(best.target.id);
+  },{root:null,rootMargin:'-24% 0px -58% 0px',threshold:[0.2,0.45,0.7]});
+
+  for(var oi=0;oi<sections.length;oi++)observer.observe(sections[oi]);
 }
 
 /* ======== INIT ======== */
 function init(){
   restoreState();
-  bindCombinedMode();
+  bindMergedNav();
   updateTabUI();updateLabels();
   setupChart();chartLoop();
   window.addEventListener('resize',function(){setupChart()});
