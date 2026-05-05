@@ -1,0 +1,16 @@
+{
+  "name": "btc-terminal-v3",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "node app-server.js",
+    "start": "node app-server.js",
+    "compose:up": "docker compose up --build -d",
+    "compose:down": "docker compose down",
+    "compose:logs": "docker compose logs -f"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "http-server": "^14.1.1"
+  }
+}

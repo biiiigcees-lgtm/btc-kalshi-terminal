@@ -1,0 +1,426 @@
+services:
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+    init: true
+    depends_on:
+      redis:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+      inference:
+        condition: service_healthy
+      simulator:
+        condition: service_healthy
+      ingestion:
+        condition: service_healthy
+      backtester:
+        condition: service_healthy
+      risk:
+        condition: service_healthy
+      microstructure:
+        condition: service_healthy
+      regime:
+        condition: service_healthy
+      intelligence:
+        condition: service_healthy
+      calibration:
+        condition: service_healthy
+      execution:
+        condition: service_healthy
+      outcome:
+        condition: service_healthy
+      mlops:
+        condition: service_healthy
+      data-lake:
+        condition: service_healthy
+    volumes:
+      - .:/app
+    environment:
+      NODE_ENV: development
+      CHOKIDAR_USEPOLLING: "true"
+      DATABASE_URL: ${DATABASE_URL:-postgresql://trader:trader@db:5432/btc}
+      REDIS_URL: redis://redis:6379
+      EVENT_CHANNEL: ${EVENT_CHANNEL:-trading_events}
+      INFERENCE_URL: http://inference:4001
+      SIMULATOR_URL: http://simulator:4002
+      INGESTION_URL: http://ingestion:4003
+      BACKTESTER_URL: http://backtester:4004
+      RISK_URL: http://risk:4005
+      MICROSTRUCTURE_URL: http://microstructure:4006
+      REGIME_URL: http://regime:4007
+      INTELLIGENCE_URL: http://intelligence:4008
+      CALIBRATION_URL: http://calibration:4009
+      EXECUTION_URL: http://execution:4010
+      OUTCOME_URL: http://outcome:4011
+      MLOPS_URL: http://mlops:4012
+      DATA_LAKE_URL: http://data-lake:4013
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000 >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  inference:
+    build: ./services/inference
+    ports:
+      - "4001:4001"
+    restart: unless-stopped
+    init: true
+    environment:
+      NODE_ENV: development
+      MODEL_PATH: /models/model.onnx
+      REDIS_URL: redis://redis:6379
+      EVENT_CHANNEL: ${EVENT_CHANNEL:-trading_events}
+    volumes:
+      - ./models:/models
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:4001/health >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  simulator:
+    build: ./services/simulator
+    ports:
+      - "4002:4002"
+    restart: unless-stopped
+    init: true
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: ${DATABASE_URL:-postgresql://trader:trader@db:5432/btc}
+      RISK_URL: http://risk:4005
+      REDIS_URL: redis://redis:6379
+      EVENT_CHANNEL: ${EVENT_CHANNEL:-trading_events}
+    depends_on:
+      redis:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+      risk:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:4002/health >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  ingestion:
+    build: ./services/ingestion
+    ports:
+      - "4003:4003"
+    restart: unless-stopped
+    init: true
+    environment:
+      NODE_ENV: development
+      COINBASE_WS_URL: wss://ws-feed.exchange.coinbase.com
+      REDIS_URL: redis://redis:6379
+      EVENT_CHANNEL: ${EVENT_CHANNEL:-trading_events}
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:4003/health >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  backtester:
+    build: ./services/backtester
+    ports:
+      - "4004:4004"
+    restart: unless-stopped
+    init: true
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: ${DATABASE_URL:-postgresql://trader:trader@db:5432/btc}
+      RISK_URL: http://risk:4005
+      REDIS_URL: redis://redis:6379
+      EVENT_CHANNEL: ${EVENT_CHANNEL:-trading_events}
+    depends_on:
+      redis:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+      risk:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:4004/health >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  risk:
+    build: ./services/risk
+    ports:
+      - "4005:4005"
+    restart: unless-stopped
+    init: true
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: ${DATABASE_URL:-postgresql://trader:trader@db:5432/btc}
+      REDIS_URL: redis://redis:6379
+      EVENT_CHANNEL: ${EVENT_CHANNEL:-trading_events}
+      NOTIONAL_BANKROLL: ${NOTIONAL_BANKROLL:-10000}
+      MAX_TRADE_RISK_PCT: ${MAX_TRADE_RISK_PCT:-0.25}
+      MAX_DAILY_LOSS_PCT: ${MAX_DAILY_LOSS_PCT:-2}
+      MAX_DRAWDOWN_PCT: ${MAX_DRAWDOWN_PCT:-5}
+      MAX_EXPOSURE_PER_REGIME_PCT: ${MAX_EXPOSURE_PER_REGIME_PCT:-40}
+      COOLDOWN_AFTER_LOSS_TRADES: ${COOLDOWN_AFTER_LOSS_TRADES:-3}
+      MAX_BACKTEST_PROJECTED_LOSS: ${MAX_BACKTEST_PROJECTED_LOSS:-800}
+      COOLDOWN_MINUTES: ${COOLDOWN_MINUTES:-30}
+    depends_on:
+      redis:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:4005/health >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  microstructure:
+    build: ./services/microstructure
+    ports:
+      - "4006:4006"
+    restart: unless-stopped
+    init: true
+    environment:
+      NODE_ENV: development
+      REDIS_URL: redis://redis:6379
+      EVENT_CHANNEL: ${EVENT_CHANNEL:-trading_events}
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:4006/health >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  regime:
+    build: ./services/regime
+    ports:
+      - "4007:4007"
+    restart: unless-stopped
+    init: true
+    environment:
+      NODE_ENV: development
+      REDIS_URL: redis://redis:6379
+      EVENT_CHANNEL: ${EVENT_CHANNEL:-trading_events}
+    depends_on:
+      redis:
+        condition: service_healthy
+      microstructure:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:4007/health >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  intelligence:
+    build: ./services/intelligence
+    ports:
+      - "4008:4008"
+    restart: unless-stopped
+    init: true
+    environment:
+      NODE_ENV: development
+      REDIS_URL: redis://redis:6379
+      EVENT_CHANNEL: ${EVENT_CHANNEL:-trading_events}
+      EV_THRESHOLD: ${EV_THRESHOLD:-2.5}
+    depends_on:
+      redis:
+        condition: service_healthy
+      microstructure:
+        condition: service_healthy
+      regime:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:4008/health >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  calibration:
+    build: ./services/calibration
+    ports:
+      - "4009:4009"
+    restart: unless-stopped
+    init: true
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: ${DATABASE_URL:-postgresql://trader:trader@db:5432/btc}
+      REDIS_URL: redis://redis:6379
+      EVENT_CHANNEL: ${EVENT_CHANNEL:-trading_events}
+      CALIBRATION_WINDOW: ${CALIBRATION_WINDOW:-2000}
+    depends_on:
+      redis:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+      intelligence:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:4009/health >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  execution:
+    build: ./services/execution
+    ports:
+      - "4010:4010"
+    restart: unless-stopped
+    init: true
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: ${DATABASE_URL:-postgresql://trader:trader@db:5432/btc}
+      REDIS_URL: redis://redis:6379
+      EVENT_CHANNEL: ${EVENT_CHANNEL:-trading_events}
+      EXECUTION_MODE: ${EXECUTION_MODE:-paper}
+    depends_on:
+      redis:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+      risk:
+        condition: service_healthy
+      intelligence:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:4010/health >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  outcome:
+    build: ./services/outcome
+    ports:
+      - "4011:4011"
+    restart: unless-stopped
+    init: true
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: ${DATABASE_URL:-postgresql://trader:trader@db:5432/btc}
+      REDIS_URL: redis://redis:6379
+      EVENT_CHANNEL: ${EVENT_CHANNEL:-trading_events}
+      OUTCOME_DELAY_MS: ${OUTCOME_DELAY_MS:-900000}
+    depends_on:
+      redis:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+      execution:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:4011/health >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  mlops:
+    build: ./services/mlops
+    ports:
+      - "4012:4012"
+    restart: unless-stopped
+    init: true
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: ${DATABASE_URL:-postgresql://trader:trader@db:5432/btc}
+      REDIS_URL: redis://redis:6379
+      EVENT_CHANNEL: ${EVENT_CHANNEL:-trading_events}
+    depends_on:
+      redis:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+      outcome:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:4012/health >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  data-lake:
+    build: ./services/data-lake
+    ports:
+      - "4013:4013"
+    restart: unless-stopped
+    init: true
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: ${DATABASE_URL:-postgresql://trader:trader@db:5432/btc}
+      REDIS_URL: redis://redis:6379
+      EVENT_CHANNEL: ${EVENT_CHANNEL:-trading_events}
+    depends_on:
+      redis:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:4013/health >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  trainer:
+    build: ./services/trainer
+    volumes:
+      - ./data:/data
+      - ./models:/models
+    environment:
+      MODEL_OUTPUT_PATH: /models/model.pkl
+      FEATURES_PATH: /data/features.csv
+    profiles:
+      - ml
+
+  db:
+    image: postgres:15
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: trader
+      POSTGRES_PASSWORD: trader
+      POSTGRES_DB: btc
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trader -d btc"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+      start_period: 5s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+      start_period: 5s
+
+volumes:
+  postgres_data:

@@ -1,0 +1,11 @@
+{
+  "name": "calibration-service",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": { "dev": "node server.js" },
+  "dependencies": {
+    "express": "^4.21.2",
+    "pg": "^8.13.1",
+    "redis": "^4.7.0"
+  }
+}
