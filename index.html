@@ -1167,9 +1167,9 @@ function calcEV(conf,mode){
   // Platt-scaled probability: logistic mapping of confidence to win probability
   // Calibrated so conf=0→0.50, conf=50→0.62, conf=80→0.74, conf=98→0.82
   // p = 1 / (1 + exp(-k*(conf - c0))) where k=0.04, c0=0 maps [0,98] → [0.50,0.82]
-  var z=(conf-50)*0.06; // shift & scale: conf 50 → z=0, conf 98 → z=2.88
+  var z=(conf-50)*0.065; // slightly steeper calibration to reward stronger setups
   var p=1/(1+Math.exp(-z));
-  p=clamp(p,0.50,0.82); // never claim >82% edge on a binary
+  p=clamp(p,0.50,0.84); // still conservative, but allows better signal separation
   var edge=2*p-1;
   var ev=edge*p-(1-p)*(1-edge);
   var margin=(RISK_PROFILES[mode]||RISK_PROFILES.balanced).edgeThresh;
@@ -1196,12 +1196,12 @@ function checkConfluence(trendS,oscS,momS,volS,flowS,htfS,mode){
   // Mode-adaptive requirement
   C.required=mode==='safe'?4:mode==='aggressive'?2:3;
   var pass=dominant>=C.required;
+
   // Additional: reject if classes are split — mode-adaptive conflict threshold
   // Aggressive: only conflict if BOTH sides pass aggressive's own threshold (2)
   // Safe: conflict at 2+/2+ (strict), Balanced: 2+/2+
   var conflictMin=mode==='aggressive'?3:2;
   var conflicted=bullish>=conflictMin&&bearish>=conflictMin;
-  C.conflicted=conflicted;
   if(conflicted)pass=false;
   return{pass:pass,aligned:dominant,total:total,direction:bullish>=bearish?1:-1,conflicted:conflicted,agreement:C.agreement}
 }
@@ -1315,8 +1315,8 @@ function dseUpdate(rawScore,rawConf,rawCall,modeThresh){
   // 5. ASYMPTOTIC THRESHOLDS — commit requires strong probabilistic dominance
   // Mode-adaptive: aggressive trades through uncertainty, safe demands clarity
   var isAggr=S.mode==='aggressive',isSafe=S.mode==='safe';
-  var baseCommit=isAggr?0.62:isSafe?0.78:0.72;
-  var baseRelease=isAggr?0.42:isSafe?0.34:0.38;
+  var baseCommit=isAggr?0.60:isSafe?0.75:0.69;
+  var baseRelease=isAggr?0.44:isSafe?0.36:0.40;
   var flipPenalty=Math.min(D.flips*0.04,0.18);
   D.commitThresh=baseCommit+flipPenalty;
   D.releaseThresh=baseRelease-flipPenalty*0.5;
@@ -1629,13 +1629,13 @@ function analyze(opts){
   var phase=kal.phase;
   var timingMult=1.0;
   if(phase==='early'){
-    timingMult=0.4; // early phase: heavy penalty — avoid premature entries
+    timingMult=0.55; // still cautious, but less restrictive for high-quality early setups
     signals.push({name:'Timing',val:'EARLY \u2014 PATIENCE',type:'neu'})
   }else if(phase==='mid'){
-    timingMult=0.85; // mid phase: slight penalty
+    timingMult=0.92; // mid phase: moderate penalty
     signals.push({name:'Timing',val:'MID \u2014 WATCHING',type:'neu'})
   }else if(phase==='late'){
-    timingMult=1.0; // late phase: optimal for micro-timing
+    timingMult=1.05; // small late-phase boost
     signals.push({name:'Timing',val:'LATE \u2014 OPTIMAL',type:'up'})
   }else{
     timingMult=0.2; // expired or unknown
@@ -1680,7 +1680,7 @@ function analyze(opts){
     var cflReq=m==='safe'?4:m==='aggressive'?2:3;
     var cflPass=cfl.aligned>=cflReq&&!cfl.conflicted;
     var evM=calcEV(rawConf,m);
-    var mMinConf=m==='safe'?80:m==='aggressive'?50:65;
+    var mMinConf=m==='safe'?76:m==='aggressive'?45:60;
 
     if(m==='aggressive'){
       var aScore=score*(1+Math.abs(ind.mom)*2);
@@ -1784,7 +1784,7 @@ function analyze(opts){
 
   // ===== MODE-ENTROPY CONFLICT — flag & recommend =====
   var modeConflict=null;
-  if(mode==='safe'&&dse.entropy<0.3&&finalConf>70){
+  if(mode==='safe'&&dse.entropy<0.35&&finalConf>68){
     modeConflict='Low entropy with strong conviction \u2014 Safe mode may be leaving edge on the table. Consider Balanced.';
   }
 
@@ -2210,11 +2210,29 @@ function analyzeTargetPrice(currentPrice,targetPrice,secondsToExpiry,recentPrice
 
 /* ======== RISK PROFILES — Central config for all betting styles ======== */
 var RISK_PROFILES={
-  safe:      {kellyMult:0.15, edgeThresh:0.08, maxPct:0.08, ddLimit:0.10, maxTradeAmt:100, dailyLossLimit:200, label:'Eighth Kelly',  desc:'Capital preservation first. Only bets on high-confidence signals with wide safety margins. Ideal for protecting bankroll during choppy or uncertain markets.'},
-  balanced:  {kellyMult:0.35, edgeThresh:0.05, maxPct:0.15, ddLimit:0.15, maxTradeAmt:250, dailyLossLimit:500, label:'Third Kelly',   desc:'Moderate stakes with disciplined edge thresholds. Balances growth and risk for steady, consistent returns across market conditions.'},
-  aggressive:{kellyMult:0.70, edgeThresh:0.02, maxPct:0.25, ddLimit:0.20, maxTradeAmt:500, dailyLossLimit:1000, label:'Fractional Kelly',desc:'Maximum EV extraction. Larger positions on lower-threshold edges. Higher variance \u2014 designed for experienced traders comfortable with drawdowns.'}
+  safe:      {kellyMult:0.15, edgeThresh:0.07, maxPct:0.08, ddLimit:0.10, maxTradeAmt:100, dailyLossLimit:200, label:'Eighth Kelly',  desc:'Capital preservation first. Only bets on high-confidence signals with wide safety margins. Ideal for protecting bankroll during choppy or uncertain markets.'},
+  balanced:  {kellyMult:0.35, edgeThresh:0.04, maxPct:0.15, ddLimit:0.15, maxTradeAmt:250, dailyLossLimit:500, label:'Third Kelly',   desc:'Moderate stakes with disciplined edge thresholds. Balances growth and risk for steady, consistent returns across market conditions.'},
+  aggressive:{kellyMult:0.70, edgeThresh:0.015, maxPct:0.25, ddLimit:0.20, maxTradeAmt:500, dailyLossLimit:1000, label:'Fractional Kelly',desc:'Maximum EV extraction. Larger positions on lower-threshold edges. Higher variance \u2014 designed for experienced traders comfortable with drawdowns.'}
 };
 var HYSTERESIS_MARGIN=0.10; // 10 percentage points required to flip direction across rounds
+
+function getAdaptiveEdgeThreshold(style,analysis){
+  var prof=RISK_PROFILES[style]||RISK_PROFILES.balanced;
+  var base=prof.edgeThresh;
+  if(!analysis)return base;
+
+  var bonus=0;
+  if(analysis.dse&&analysis.dse.entropy<0.42)bonus+=0.008;
+  if(analysis.dse&&analysis.dse.ticksInState>=24)bonus+=0.004;
+  if(S.conf&&S.conf.agreement>=0.72)bonus+=0.006;
+  if((analysis.urgency||1)>=0.9)bonus+=0.003;
+
+  if(style==='aggressive')bonus*=1.35;
+  else if(style==='safe')bonus*=0.7;
+
+  var floor=style==='safe'?0.06:style==='balanced'?0.03:0.01;
+  return clamp(base-bonus,floor,base);
+}
 
 /**
  * Pure position sizing function — config-driven, no side effects.
@@ -2226,9 +2244,10 @@ var HYSTERESIS_MARGIN=0.10; // 10 percentage points required to flip direction a
  */
 function getPositionSize(style,bankroll,edge,fullKelly){
   var prof=RISK_PROFILES[style]||RISK_PROFILES.balanced;
+  var edgeThresh=getAdaptiveEdgeThreshold(style,S.analysis);
   if(!bankroll||bankroll<=0)return{enabled:false,sizeInDollars:0,sizeAsPct:0,label:prof.label,reason:'No bankroll'};
   if(edge<=0)return{enabled:false,sizeInDollars:0,sizeAsPct:0,label:prof.label,reason:'Edge negative'};
-  if(edge<prof.edgeThresh)return{enabled:false,sizeInDollars:0,sizeAsPct:0,label:prof.label,reason:'Edge '+edge.toFixed(3)+' < threshold '+prof.edgeThresh};
+  if(edge<edgeThresh)return{enabled:false,sizeInDollars:0,sizeAsPct:0,label:prof.label,reason:'Edge '+edge.toFixed(3)+' < adaptive threshold '+edgeThresh.toFixed(3)};
   var frac=fullKelly*prof.kellyMult;
   frac=Math.min(frac,prof.maxPct); // hard cap per style
   var size=Math.round(bankroll*frac);
@@ -2288,8 +2307,9 @@ function getDecision(style,inputs,forceOverride){
   }
 
   // Check edge threshold for this style
-  if(edge<prof.edgeThresh){
-    var noTradeRationale=['Edge ('+edge.toFixed(3)+') below '+style+' threshold ('+prof.edgeThresh+').'];
+  var edgeThresh=getAdaptiveEdgeThreshold(style,a);
+  if(edge<edgeThresh){
+    var noTradeRationale=['Edge ('+edge.toFixed(3)+') below '+style+' adaptive threshold ('+edgeThresh.toFixed(3)+').'];
     if(style==='safe')noTradeRationale.push('Safe mode requires strong setups — standing aside.');
     else if(style==='balanced')noTradeRationale.push('Edge too thin for balanced sizing — watching.');
     else noTradeRationale.push('Edge below minimum even for aggressive — no trade.');
@@ -2307,7 +2327,7 @@ function getDecision(style,inputs,forceOverride){
   var confLevel=a.conf>=70?'high':a.conf>=45?'medium':'low';
   var rationale=[];
   rationale.push('Direction: '+direction+' strike — '+a.conf+'% model confidence.');
-  rationale.push('Edge: '+edge.toFixed(3)+' (threshold: '+prof.edgeThresh+') — '+prof.label+' sizing.');
+  rationale.push('Edge: '+edge.toFixed(3)+' (adaptive threshold: '+edgeThresh.toFixed(3)+') — '+prof.label+' sizing.');
   if(a.dse)rationale.push('DSE: P(above)='+a.dse.probAbove.toFixed(2)+', entropy='+a.dse.entropy.toFixed(2)+', '+a.dse.ticksInState+' ticks in state.');
   if(S.ind&&S.ind.regime)rationale.push('Regime: '+S.ind.regime.replace('_',' ')+' — urgency '+Math.round((a.urgency||1)*100)+'%.');
   if(a.sr&&a.sr.nearest)rationale.push('Key level: '+a.sr.nearest.type+' at '+fmt$(a.sr.nearest.price,getCfg().priceDec)+' ('+a.sr.nearest.touches+'x tested).');
@@ -2404,7 +2424,7 @@ function getBettingRecommendation(analysis,mode,bankroll){
 
   // --- Decision ---
   // More willing to recommend a bet when the edge is clear, especially for balanced/aggressive
-  var edgeThreshold = prof.edgeThresh;
+  var edgeThreshold=getAdaptiveEdgeThreshold(mode,analysis);
   var recommendBet = false;
   if (edge > 0 && edge >= edgeThreshold) {
     recommendBet = true;
@@ -2416,7 +2436,7 @@ function getBettingRecommendation(analysis,mode,bankroll){
   if(!recommendBet){
     result.decision='Hold';
     result.confidence=Math.round(clamp((1-Math.abs(edge)*10)*30,5,40));
-    result.reasoning=edge<=0?'Price looks pretty fair rn — no real deal to grab here.':'The edge is only '+(edge*100).toFixed(1)+'¢, not enough for '+mode+' mode (needs '+(prof.edgeThresh*100).toFixed(0)+'¢+). Gonna sit this one out.';
+    result.reasoning=edge<=0?'Price looks pretty fair rn — no real deal to grab here.':'The edge is only '+(edge*100).toFixed(1)+'¢, not enough for '+mode+' mode right now (needs '+(edgeThreshold*100).toFixed(1)+'¢+ adaptive). Gonna sit this one out.';
     return result;
   }
 
