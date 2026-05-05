@@ -12,6 +12,10 @@ const MIN_VALIDATION_SAMPLES = Number.parseInt(process.env.MIN_VALIDATION_SAMPLE
 const DIVERGENCE_ALERT_THRESHOLD = Number.parseFloat(process.env.DIVERGENCE_ALERT_THRESHOLD || "0.12");
 const MODEL_IMPROVEMENT_DELTA = Number.parseFloat(process.env.MODEL_IMPROVEMENT_DELTA || "0.003");
 const MIN_SHARPE_FOR_DEPLOY = Number.parseFloat(process.env.MIN_SHARPE_FOR_DEPLOY || "0");
+const PURGED_WF_FOLDS = Number.parseInt(process.env.PURGED_WF_FOLDS || "5", 10);
+const PURGE_SAMPLES = Number.parseInt(process.env.PURGE_SAMPLES || "5", 10);
+const EMBARGO_SAMPLES = Number.parseInt(process.env.EMBARGO_SAMPLES || "5", 10);
+const LEAKAGE_MAX_CLOCK_SKEW_MS = Number.parseInt(process.env.LEAKAGE_MAX_CLOCK_SKEW_MS || "1500", 10);
 
 const pool = DATABASE_URL ? new Pool({ connectionString: DATABASE_URL }) : null;
 const sub = createClient({ url: REDIS_URL });
@@ -55,6 +59,189 @@ function computeAccuracy(probabilities, outcomes) {
 function computeBrier(probabilities, outcomes) {
   if (!probabilities.length) return 0;
   return average(probabilities.map((p, i) => (p - outcomes[i]) ** 2));
+}
+
+function metricSet(rows) {
+  const outcomes = rows.map((r) => r.outcome);
+  const probabilities = rows.map((r) => r.calibrated_probability);
+
+  return {
+    accuracy: computeAccuracy(probabilities, outcomes),
+    brier: computeBrier(probabilities, outcomes),
+    count: rows.length,
+  };
+}
+
+function computePurgedWalkForward(rows) {
+  const folds = clampInt(PURGED_WF_FOLDS, 2, 12);
+  const purge = clampInt(PURGE_SAMPLES, 0, 100);
+  const embargo = clampInt(EMBARGO_SAMPLES, 0, 100);
+
+  if (rows.length < Math.max(20, folds * 6)) {
+    return {
+      enabled: false,
+      reason: "insufficient samples",
+      folds: [],
+      fold_count: 0,
+      train_accuracy: 0,
+      oos_accuracy: 0,
+      train_brier: 0,
+      oos_brier: 0,
+      accuracy_gap: 0,
+      purge_samples: purge,
+      embargo_samples: embargo,
+    };
+  }
+
+  const foldSize = Math.max(1, Math.floor(rows.length / folds));
+  const foldMetrics = [];
+
+  for (let fold = 0; fold < folds; fold += 1) {
+    const testStart = fold * foldSize;
+    const testEnd = fold === folds - 1 ? rows.length : Math.min(rows.length, testStart + foldSize);
+    const exclusionStart = Math.max(0, testStart - purge);
+    const exclusionEnd = Math.min(rows.length, testEnd + embargo);
+
+    const trainRows = [];
+    for (let i = 0; i < rows.length; i += 1) {
+      if (i >= exclusionStart && i < exclusionEnd) continue;
+      trainRows.push(rows[i]);
+    }
+
+    const testRows = rows.slice(testStart, testEnd);
+    if (trainRows.length < 10 || testRows.length < 5) {
+      continue;
+    }
+
+    const trainMetrics = metricSet(trainRows);
+    const testMetrics = metricSet(testRows);
+    foldMetrics.push({
+      fold,
+      test_start_index: testStart,
+      test_end_index: testEnd,
+      train_count: trainMetrics.count,
+      test_count: testMetrics.count,
+      train_accuracy: trainMetrics.accuracy,
+      oos_accuracy: testMetrics.accuracy,
+      train_brier: trainMetrics.brier,
+      oos_brier: testMetrics.brier,
+      accuracy_gap: trainMetrics.accuracy - testMetrics.accuracy,
+    });
+  }
+
+  if (!foldMetrics.length) {
+    return {
+      enabled: false,
+      reason: "no valid folds",
+      folds: [],
+      fold_count: 0,
+      train_accuracy: 0,
+      oos_accuracy: 0,
+      train_brier: 0,
+      oos_brier: 0,
+      accuracy_gap: 0,
+      purge_samples: purge,
+      embargo_samples: embargo,
+    };
+  }
+
+  return {
+    enabled: true,
+    folds: foldMetrics,
+    fold_count: foldMetrics.length,
+    train_accuracy: average(foldMetrics.map((f) => f.train_accuracy)),
+    oos_accuracy: average(foldMetrics.map((f) => f.oos_accuracy)),
+    train_brier: average(foldMetrics.map((f) => f.train_brier)),
+    oos_brier: average(foldMetrics.map((f) => f.oos_brier)),
+    accuracy_gap: average(foldMetrics.map((f) => f.accuracy_gap)),
+    purge_samples: purge,
+    embargo_samples: embargo,
+  };
+}
+
+function clampInt(value, min, max) {
+  const parsed = Number.parseInt(value, 10);
+  if (Number.isNaN(parsed)) return min;
+  return Math.min(max, Math.max(min, parsed));
+}
+
+async function computeLeakageChecks() {
+  if (!pool || !dbReady) {
+    return {
+      checked: false,
+      inspected: 0,
+      missing_fields: 0,
+      invalid_timestamps: 0,
+      violations: 0,
+      legacy_skipped: 0,
+      max_positive_skew_ms: null,
+      max_allowed_skew_ms: LEAKAGE_MAX_CLOCK_SKEW_MS,
+    };
+  }
+
+  const maxRows = Math.max(200, VALIDATION_WINDOW * 4);
+  const read = await pool.query(
+    `
+      SELECT
+        payload ? 'expected_value_lcb' AS has_uncertainty_fields,
+        payload->>'feature_ts' AS feature_ts,
+        payload->>'decision_ts' AS decision_ts
+      FROM event_log
+      WHERE event_type IN ('trade_decision', 'trade_decision_rejected')
+      ORDER BY created_at DESC
+      LIMIT $1;
+    `,
+    [maxRows]
+  );
+
+  let inspected = 0;
+  let missingFields = 0;
+  let invalidTimestamps = 0;
+  let violations = 0;
+  let legacySkipped = 0;
+  let maxPositiveSkewMs = Number.NEGATIVE_INFINITY;
+
+  for (const row of read.rows) {
+    const requiresStrictChecks = Boolean(row.has_uncertainty_fields);
+    const featureTs = row.feature_ts;
+    const decisionTs = row.decision_ts;
+    if (!featureTs || !decisionTs) {
+      if (!requiresStrictChecks) {
+        legacySkipped += 1;
+        continue;
+      }
+      missingFields += 1;
+      violations += 1;
+      continue;
+    }
+
+    const featureMs = Date.parse(featureTs);
+    const decisionMs = Date.parse(decisionTs);
+    if (!Number.isFinite(featureMs) || !Number.isFinite(decisionMs)) {
+      invalidTimestamps += 1;
+      violations += 1;
+      continue;
+    }
+
+    inspected += 1;
+    const skewMs = featureMs - decisionMs;
+    maxPositiveSkewMs = Math.max(maxPositiveSkewMs, skewMs);
+
+    if (skewMs > LEAKAGE_MAX_CLOCK_SKEW_MS) {
+      violations += 1;
+    }
+  }
+
+  return {
+    checked: true,
+    inspected,
+    missing_fields: missingFields,
+    invalid_timestamps: invalidTimestamps,
+    violations,
+    legacy_skipped: legacySkipped,
+    max_positive_skew_ms: Number.isFinite(maxPositiveSkewMs) ? maxPositiveSkewMs : null,
+    max_allowed_skew_ms: LEAKAGE_MAX_CLOCK_SKEW_MS,
+  };
 }
 
 function precisionRecall(probabilities, outcomes) {
@@ -137,6 +324,7 @@ async function computeValidationReport() {
   if (!pool || !dbReady) return null;
 
   const rows = await loadValidationRows();
+  const leakageChecks = await computeLeakageChecks();
   const outcomes = rows.map((r) => r.outcome);
   const calibrated = rows.map((r) => r.calibrated_probability);
   const randomBaseline = rows.map((r) => r.baseline_random);
@@ -151,22 +339,7 @@ async function computeValidationReport() {
   const movingAverageAccuracy = computeAccuracy(movingAverageBaseline, outcomes);
   const pr = precisionRecall(calibrated, outcomes);
 
-  const split = Math.max(1, Math.floor(rows.length * 0.7));
-  const trainRows = rows.slice(0, split);
-  const oosRows = rows.slice(split);
-
-  const trainAccuracy = computeAccuracy(
-    trainRows.map((r) => r.calibrated_probability),
-    trainRows.map((r) => r.outcome)
-  );
-  const oosAccuracy = computeAccuracy(
-    oosRows.map((r) => r.calibrated_probability),
-    oosRows.map((r) => r.outcome)
-  );
-  const oosBrier = computeBrier(
-    oosRows.map((r) => r.calibrated_probability),
-    oosRows.map((r) => r.outcome)
-  );
+  const walkForward = computePurgedWalkForward(rows);
 
   const backtestRead = await pool.query(
     `
@@ -184,15 +357,18 @@ async function computeValidationReport() {
   const divergence = backtestAccuracy - liveAccuracy;
   const beatsBaselines =
     liveAccuracy > randomAccuracy && liveAccuracy > momentumAccuracy && liveAccuracy > movingAverageAccuracy;
+  const walkForwardGapAlert = walkForward.enabled && walkForward.accuracy_gap > DIVERGENCE_ALERT_THRESHOLD;
+  const leakageAlert = leakageChecks.checked && leakageChecks.violations > 0;
   const overfitAlert =
     divergence > DIVERGENCE_ALERT_THRESHOLD ||
-    (trainRows.length > 10 && oosRows.length > 10 && trainAccuracy - oosAccuracy > DIVERGENCE_ALERT_THRESHOLD);
+    walkForwardGapAlert;
 
   const initialized = rows.length >= MIN_VALIDATION_SAMPLES;
+  const walkForwardReady = !initialized || !walkForward.enabled || walkForward.fold_count >= Math.max(2, Math.floor(PURGED_WF_FOLDS / 2));
   const sharpeRatio = computeSharpe(pnl);
   const approved =
     !initialized ||
-    (beatsBaselines && !overfitAlert && sharpeRatio >= MIN_SHARPE_FOR_DEPLOY && brierCalibrated <= 0.26);
+    (beatsBaselines && !overfitAlert && !leakageAlert && walkForwardReady && sharpeRatio >= MIN_SHARPE_FOR_DEPLOY && brierCalibrated <= 0.26);
 
   return {
     initialized,
@@ -210,10 +386,19 @@ async function computeValidationReport() {
       moving_average: movingAverageAccuracy,
     },
     beats_baselines: beatsBaselines,
+    leakage_checks: leakageChecks,
     walk_forward: {
-      train_accuracy: trainAccuracy,
-      oos_accuracy: oosAccuracy,
-      oos_brier: oosBrier,
+      mode: "purged_k_fold",
+      enabled: walkForward.enabled,
+      reason: walkForward.reason || null,
+      fold_count: walkForward.fold_count,
+      purge_samples: walkForward.purge_samples,
+      embargo_samples: walkForward.embargo_samples,
+      train_accuracy: walkForward.train_accuracy,
+      oos_accuracy: walkForward.oos_accuracy,
+      train_brier: walkForward.train_brier,
+      oos_brier: walkForward.oos_brier,
+      accuracy_gap: walkForward.accuracy_gap,
     },
     backtest_accuracy: backtestAccuracy,
     live_backtest_divergence: divergence,

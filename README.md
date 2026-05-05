@@ -80,6 +80,7 @@ docker compose down
 npm run compose:up
 npm run compose:logs
 npm run compose:down
+npm run ci:leakage-guard
 ```
 
 ## Dev Container Workflow
@@ -156,18 +157,20 @@ Write-path guardrails:
 
 Event-driven trade path:
 
-`tick_received -> microstructure_update -> regime_shift/signal_generated -> trade_decision -> risk_update -> execution_fill -> trade_resolved -> calibration_updated/model_updated`
+`tick_received -> microstructure_update -> regime_shift/signal_generated -> signal_calibrated -> trade_decision -> risk_update -> execution_fill -> trade_resolved -> calibration_updated/model_updated`
 
 ## Statistical Discipline Upgrades
 
 - Calibration-first decision flow: `signal_generated -> signal_calibrated -> trade_decision`
 - Calibration methods: Platt scaling + isotonic regression blend on rolling window
 - Regime-aware filtering: `trend_breakout`, `mean_reversion`, `low_volatility_chop`, `liquidity_vacuum`, `news_spike_volatility_shock`
-- Confidence/EV gate: trade only when `confidence > 0.65` and `EV > 0`
+- Confidence/EV gate: trade only when `confidence > 0.65`, `EV > 0`, and EV lower-confidence-bound remains positive
+- Leakage guard: reject any decision where feature timestamp is ahead of decision timestamp beyond configured skew
 - Signal decay model: decisions expire using 30s-90s volatility-adjusted decay
 - Adaptive weights: decay-weighted, regime-conditioned component weighting with smoothing
 - Execution realism: 1-3s delayed fills, volatility slippage, spread widening, liquidity impact
-- Validation framework: random/momentum/moving-average baselines, walk-forward and OOS checks
+- Validation framework: random/momentum/moving-average baselines plus purged K-fold walk-forward with embargo
+- CI leakage breaker: `npm run ci:leakage-guard` fails when leakage checks report violations
 - Overfitting control: live-vs-backtest divergence alert and model update rejection
 - Sharpe-first model deployment: redeploy only when validation passes and metrics improve
 

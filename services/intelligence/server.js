@@ -12,6 +12,8 @@ const SIGNAL_DECAY_MAX_MS = Number.parseInt(process.env.SIGNAL_DECAY_MAX_MS || "
 const WEIGHT_SMOOTHING_ALPHA = Number.parseFloat(process.env.WEIGHT_SMOOTHING_ALPHA || "0.2");
 const WEIGHT_PERF_DECAY = Number.parseFloat(process.env.WEIGHT_PERF_DECAY || "0.9");
 const MIN_SHARPE_FOR_TRADING = Number.parseFloat(process.env.MIN_SHARPE_FOR_TRADING || "0");
+const EV_CONFIDENCE_Z = Number.parseFloat(process.env.EV_CONFIDENCE_Z || "1.28");
+const LEAKAGE_MAX_CLOCK_SKEW_MS = Number.parseInt(process.env.LEAKAGE_MAX_CLOCK_SKEW_MS || "1500", 10);
 
 const sub = createClient({ url: REDIS_URL });
 const pub = createClient({ url: REDIS_URL });
@@ -76,6 +78,14 @@ function computeSharpe(values) {
   const std = Math.sqrt(variance);
   if (std === 0) return 0;
   return (mean / std) * Math.sqrt(values.length);
+}
+
+function parseTimeMs(value) {
+  if (!value || typeof value !== "string") {
+    return Number.NaN;
+  }
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : Number.NaN;
 }
 
 function normalizeWeights(weights) {
@@ -284,6 +294,14 @@ async function generateSignal(feature) {
 }
 
 async function evaluateCalibratedSignal(calibrated) {
+  const decisionTimestamp = new Date().toISOString();
+  const decisionTimestampMs = parseTimeMs(decisionTimestamp);
+  const featureTimestamp = String(calibrated.ts || calibrated.feature_ts || "");
+  const featureTimestampMs = parseTimeMs(featureTimestamp);
+  const featureClockSkewMs = Number.isFinite(featureTimestampMs)
+    ? featureTimestampMs - decisionTimestampMs
+    : Number.POSITIVE_INFINITY;
+
   const rawSignal = Number(calibrated.raw_signal || 0);
   const volatility = Number(calibrated.feature_snapshot?.volatility || 0);
   const momentum = Number(calibrated.feature_snapshot?.momentum || 0);
@@ -294,6 +312,12 @@ async function evaluateCalibratedSignal(calibrated) {
   const decayMs = computeDecayMs(volatility);
   const { decayedScore, decayFactor } = applySignalDecay(rawSignal, signalAgeMs, decayMs);
   const expectedValue = calibratedProbability * 100 - cost;
+  const effectiveBrier = clamp(Number(calibrationState.brier_calibrated || 0.25), 0.000001, 0.25);
+  const sampleVariance = (calibratedProbability * (1 - calibratedProbability)) / Math.max(5, Number(calibrationState.resolved || 0) + 2);
+  const uncertaintyStd = Math.sqrt(Math.max(sampleVariance, effectiveBrier * 0.5));
+  const confidenceZ = clamp(EV_CONFIDENCE_Z, 0.2, 3.5);
+  const probabilityLowerBound = clamp(calibratedProbability - confidenceZ * uncertaintyStd, 0, 1);
+  const expectedValueLowerBound = probabilityLowerBound * 100 - cost;
   const action = actionFromScore(decayedScore, confidence);
   const regimeName = String(calibrated.regime?.name || activeRegime.regime);
   const regimeCheck = regimeAlignment(action, regimeName, momentum);
@@ -304,8 +328,11 @@ async function evaluateCalibratedSignal(calibrated) {
 
   const reasons = [];
   if (!calibrationReady) reasons.push("calibration not ready");
+  if (!Number.isFinite(featureTimestampMs)) reasons.push("missing feature timestamp for leakage guard");
+  if (featureClockSkewMs > LEAKAGE_MAX_CLOCK_SKEW_MS) reasons.push("feature timestamp violates leakage guard");
   if (confidence <= MIN_CONFIDENCE) reasons.push("confidence threshold not met");
   if (expectedValue <= EV_THRESHOLD) reasons.push("expected value threshold not met");
+  if (expectedValueLowerBound <= EV_THRESHOLD) reasons.push("expected value lower bound not positive");
   if (!regimeCheck.match) reasons.push(regimeCheck.reason);
   if (!Boolean(calibrated.regime?.allow_trade)) reasons.push("regime policy blocks trading");
   if (signalAgeMs > decayMs * 2) reasons.push("signal expired by decay model");
@@ -322,9 +349,13 @@ async function evaluateCalibratedSignal(calibrated) {
     expiry: calibrated.expiry || "15m",
     action,
     probability: calibratedProbability,
+    probability_lcb: probabilityLowerBound,
     raw_probability: Number(calibrated.raw_probability || 0.5),
     confidence,
+    uncertainty_std: uncertaintyStd,
+    ev_confidence_z: confidenceZ,
     expected_value: expectedValue,
+    expected_value_lcb: expectedValueLowerBound,
     cost,
     regime: regimeName,
     regime_policy: calibrated.regime?.policy || activeRegime.policy,
@@ -342,6 +373,9 @@ async function evaluateCalibratedSignal(calibrated) {
     model_scores: calibrated.model_scores || {},
     weights: calibrated.weights || getRegimeWeights(regimeName),
     ts: calibrated.ts || new Date().toISOString(),
+    feature_ts: featureTimestamp || null,
+    decision_ts: decisionTimestamp,
+    feature_clock_skew_ms: Number.isFinite(featureClockSkewMs) ? featureClockSkewMs : null,
   };
 
   lastDecision = {
