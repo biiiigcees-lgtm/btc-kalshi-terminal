@@ -1,0 +1,15 @@
+export ZSH_THEME=""
+setopt HIST_IGNORE_ALL_DUPS
+setopt HIST_REDUCE_BLANKS
+setopt NO_BEEP
+
+alias ll='ls -lah'
+alias gs='git status'
+alias gp='git pull'
+
+if [[ -n "$ZSH_VERSION" ]]; then
+  autoload -Uz compinit && compinit -C
+fi
+
+export NODE_ENV=${NODE_ENV:-development}
+export PATH="$HOME/.local/bin:$PATH"

@@ -5,6 +5,7 @@ services:
       - "3000:3000"
     restart: unless-stopped
     init: true
+    command: npm run dev
     depends_on:
       redis:
         condition: service_healthy
@@ -38,6 +39,7 @@ services:
         condition: service_healthy
     volumes:
       - .:/app
+      - app-node-modules:/app/node_modules
     environment:
       NODE_ENV: development
       CHOKIDAR_USEPOLLING: "true"
@@ -423,6 +425,8 @@ services:
   db:
     image: postgres:15
     restart: unless-stopped
+    ports:
+      - "5433:5432"
     environment:
       POSTGRES_USER: trader
       POSTGRES_PASSWORD: trader
@@ -450,3 +454,4 @@ services:
 
 volumes:
   postgres_data:
+  app-node-modules:

@@ -2,13 +2,31 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 CREATE TABLE IF NOT EXISTS paper_trades (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  signal_id UUID,
+  decision_id UUID,
+  action TEXT NOT NULL DEFAULT 'HOLD',
+  mode TEXT,
+  regime TEXT,
+  size DOUBLE PRECISION NOT NULL DEFAULT 0,
+  entry_price DOUBLE PRECISION NOT NULL DEFAULT 0,
+  exit_price DOUBLE PRECISION,
+  pnl DOUBLE PRECISION,
+  resolved BOOLEAN NOT NULL DEFAULT FALSE,
+  resolved_at TIMESTAMPTZ,
   probability DOUBLE PRECISION NOT NULL,
   cost DOUBLE PRECISION NOT NULL,
   outcome BOOLEAN,
   payout DOUBLE PRECISION NOT NULL,
   expected_value DOUBLE PRECISION NOT NULL,
+  feature_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+  model_scores JSONB NOT NULL DEFAULT '{}'::jsonb,
+  weights JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE INDEX IF NOT EXISTS paper_trades_created_at_idx ON paper_trades (created_at DESC);
+CREATE INDEX IF NOT EXISTS paper_trades_resolved_idx ON paper_trades (resolved, resolved_at DESC);
+CREATE INDEX IF NOT EXISTS paper_trades_regime_idx ON paper_trades (regime, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS backtest_runs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -76,4 +94,31 @@ CREATE TABLE IF NOT EXISTS event_log (
   ts TIMESTAMPTZ NOT NULL,
   payload JSONB NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS metric_snapshots (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  scope TEXT NOT NULL,
+  equity DOUBLE PRECISION NOT NULL,
+  peak_equity DOUBLE PRECISION NOT NULL,
+  drawdown DOUBLE PRECISION NOT NULL,
+  exposure DOUBLE PRECISION NOT NULL DEFAULT 0,
+  pnl DOUBLE PRECISION NOT NULL DEFAULT 0,
+  trade_count INTEGER NOT NULL DEFAULT 0,
+  payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS metric_snapshots_scope_created_at_idx ON metric_snapshots (scope, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS session_state (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  session_date DATE NOT NULL UNIQUE,
+  opened_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  reset_at TIMESTAMPTZ,
+  pnl DOUBLE PRECISION NOT NULL DEFAULT 0,
+  peak_equity DOUBLE PRECISION NOT NULL DEFAULT 0,
+  drawdown DOUBLE PRECISION NOT NULL DEFAULT 0,
+  trade_count INTEGER NOT NULL DEFAULT 0,
+  payload JSONB NOT NULL DEFAULT '{}'::jsonb
 );

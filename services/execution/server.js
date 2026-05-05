@@ -102,16 +102,49 @@ async function executeDecision(decision) {
       const probability = Number(decision.probability || 0.5);
       const cost = Number(decision.cost || 50);
       const adjustedCost = Number(decision.adjusted_cost || cost);
+      const size = Math.max(0.1, Number(decision.size_multiplier || 1));
       const fillPrice = clamp(adjustedCost * (1 + simulation.totalSlippageBps / 10000), 1, 99);
+      const entryPrice = fillPrice;
       const expectedValue = probability * 100 - fillPrice;
 
       const write = await pool.query(
         `
-          INSERT INTO paper_trades (probability, cost, outcome, payout, expected_value)
-          VALUES ($1, $2, NULL, 0, $3)
+          INSERT INTO paper_trades (
+            signal_id,
+            decision_id,
+            action,
+            mode,
+            regime,
+            size,
+            entry_price,
+            probability,
+            cost,
+            outcome,
+            payout,
+            expected_value,
+            feature_snapshot,
+            model_scores,
+            weights,
+            resolved
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NULL, 0, $10, $11, $12, $13, FALSE)
           RETURNING id, created_at;
         `,
-        [probability, fillPrice, expectedValue]
+        [
+          decision.signal_id || null,
+          decision.decision_id || null,
+          decision.action || "HOLD",
+          decision.mode || EXECUTION_MODE,
+          decision.regime || "unknown",
+          size,
+          entryPrice,
+          probability,
+          fillPrice,
+          expectedValue,
+          JSON.stringify(decision.feature_snapshot || {}),
+          JSON.stringify(decision.model_scores || {}),
+          JSON.stringify(decision.weights || {}),
+        ]
       );
 
       const tradeId = write.rows[0]?.id;
@@ -122,23 +155,24 @@ async function executeDecision(decision) {
         symbol: decision.symbol,
         expiry: decision.expiry,
         action: decision.action,
+        mode: decision.mode || EXECUTION_MODE,
         regime: decision.regime,
+        size,
         probability,
         raw_probability: Number(decision.raw_probability || probability),
         calibrated_probability: probability,
         confidence: Number(decision.confidence || 0),
         cost,
         adjusted_cost: adjustedCost,
+        entry_price: entryPrice,
         expected_value: expectedValue,
         fill_price: fillPrice,
-        size_multiplier: Number(decision.size_multiplier || 1),
+        size_multiplier: size,
         latency_ms: simulation.delayMs,
         slippage_bps: simulation.totalSlippageBps,
         spread_widening_bps: simulation.spreadWideningBps,
         liquidity_impact_bps: simulation.liquidityImpactBps,
-        mode: EXECUTION_MODE,
         feature_snapshot: decision.feature_snapshot || {},
-        entry_price: Number(decision.feature_snapshot?.price || 0),
         baseline: decision.baseline || {},
         model_scores: decision.model_scores || {},
         weights: decision.weights || {},
@@ -173,8 +207,8 @@ async function start() {
       const payload = evt.payload || {};
       if (!payload.allow) return;
       await executeDecision(payload.decision || {});
-    } catch (_error) {
-      // ignore malformed events
+    } catch (error) {
+      console.error("execution event handling failed:", error.message);
     }
   });
 }

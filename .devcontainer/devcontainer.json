@@ -5,7 +5,7 @@
   "workspaceFolder": "/app",
   "shutdownAction": "stopCompose",
   "forwardPorts": [3000, 4001, 4002, 4003, 4004],
-  "postCreateCommand": "npm install",
+  "postCreateCommand": "npm install && cp .devcontainer/zshrc /root/.zshrc",
   "extensions": [
     "dbaeumer.vscode-eslint",
     "Prisma.prisma",
