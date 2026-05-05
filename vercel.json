@@ -1,6 +1,7 @@
 {
-  "outputDirectory": ".",
-  "buildCommand": "",
+  "buildCommand": "cd frontend && npm run build",
+  "outputDirectory": "frontend/.next",
+  "framework": "nextjs",
   "headers": [
     {
       "source": "/(.*)",
