@@ -2,11 +2,11 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="theme-color" content="#050a12">
 <meta name="mobile-web-app-capable" content="yes">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="manifest" href="/manifest.json">
 <title>BTC Terminal Pro</title>
 <style>
@@ -24,13 +24,13 @@ html{height:-webkit-fill-available}
 body{
   background:var(--bg);color:var(--t2);
   font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
-  font-size:12px;font-weight:400;min-height:100vh;min-height:-webkit-fill-available;
+  font-size:12px;font-weight:400;min-height:-webkit-fill-available;min-height:100vh;
   -webkit-font-smoothing:antialiased;overflow-x:hidden;
   padding:env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left)
 }
 
 /* === AMBIENT BACKGROUND === */
-.app{display:flex;flex-direction:column;min-height:100vh;min-height:-webkit-fill-available;position:relative;overflow-x:hidden;overflow-y:auto;-webkit-overflow-scrolling:touch}
+.app{display:flex;flex-direction:column;min-height:-webkit-fill-available;min-height:100vh;position:relative;overflow-x:hidden;overflow-y:auto}
 .app::before{
   content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
   background:
@@ -62,6 +62,30 @@ body{
 .glass:hover{border-color:rgba(100,140,200,0.2)}
 .sec{padding:10px 12px;margin:4px 10px}
 .stl{font-size:8px;font-weight:600;letter-spacing:.14em;color:var(--t3);margin-bottom:6px;text-transform:uppercase}
+.stl-compact{margin:0}
+.mt-12{margin-top:12px}
+
+.feed-t4{color:var(--t4)}
+.feed-agg{margin-left:auto;color:var(--b)}
+.feed-upd{color:var(--t3)}
+
+.tm-bar-init{width:0%}
+.conf-fill-init{width:0%}
+.is-hidden{display:none}
+
+.tr-kelly-safe{background:rgba(0,232,123,0.06)}
+
+.tgt-row{display:flex;justify-content:space-between;align-items:center}
+.deep-analyze-btn{font-size:10px;padding:4px 10px;border-radius:8px;border:1px solid var(--glass-border);background:var(--glass);color:var(--t2);cursor:pointer}
+.tgt-body{margin-top:6px}
+.tgt-table{width:100%;font-size:10px;border-collapse:collapse;margin-bottom:6px}
+.tgt-head{background:rgba(30,40,65,0.12)}
+.tgt-cell{padding:2px 4px;text-align:left}
+.tgt-cell-right{padding:2px 4px;text-align:right}
+.tgt-warning{font-size:9px;color:var(--o);margin-top:4px}
+
+.ind-fill-default{width:50%}
+.ob-loading{text-align:center;font-size:10px;color:var(--t4)}
 
 /* === HEADER === */
 .hdr{
@@ -428,13 +452,13 @@ body{
 /* === COIN TABS === */
 .coin-tabs{
   display:flex;gap:4px;margin:6px 12px;padding:4px;
-  overflow-x:auto;-webkit-overflow-scrolling:touch;
+  overflow-x:auto;
   background:var(--glass);border-radius:var(--radius);
   border:1px solid var(--glass-border);
   -webkit-backdrop-filter:blur(var(--blur));backdrop-filter:blur(var(--blur))
 }
 .coin-tab{
-  flex:1;min-width:0;padding:10px 4px;
+  overflow-x:auto;
   border:1px solid transparent;background:transparent;
   color:var(--t3);border-radius:var(--radius-sm);
   font-size:11px;font-weight:700;letter-spacing:.08em;
@@ -534,7 +558,7 @@ body{
 <div class="combo-shell">
   <aside class="combo-sidebar glass">
     <div class="stl">Navigation</div>
-    <nav class="combo-nav" id="comboNav">
+    <nav class="combo-nav" id="comboNav" aria-label="Primary sections">
       <button class="combo-nav-btn active" data-go="overviewSection" type="button">Overview</button>
       <button class="combo-nav-btn" data-go="kalshiSection" type="button">Kalshi</button>
       <button class="combo-nav-btn" data-go="consensusSection" type="button">Consensus</button>
@@ -543,7 +567,7 @@ body{
       <button class="combo-nav-btn" data-go="alertsSection" type="button">Alerts</button>
     </nav>
 
-    <div class="stl" style="margin-top:12px">Quick Stats</div>
+    <div class="stl mt-12">Quick Stats</div>
     <div class="quick-grid">
       <div class="quick-card">
         <div class="quick-l">Fear &amp; Greed</div>
@@ -568,12 +592,12 @@ body{
 
   <main class="combo-main">
 <div class="feed-bar" id="feedBar">
-  <span style="color:var(--t4)">FEEDS ·</span>
-  <span style="color:var(--t4)" id="fdBinance">BINANCE —</span>
-  <span style="color:var(--t4)" id="fdCoinbase">COINBASE —</span>
-  <span style="color:var(--t4)" id="fdKraken">KRAKEN —</span>
-  <span style="margin-left:auto;color:var(--b)" id="fdAgg">AGG · —</span>
-  <span style="color:var(--t3)" id="fdUpd">UPD · --:--:--</span>
+  <span class="feed-t4">FEEDS ·</span>
+  <span class="feed-t4" id="fdBinance">BINANCE —</span>
+  <span class="feed-t4" id="fdCoinbase">COINBASE —</span>
+  <span class="feed-t4" id="fdKraken">KRAKEN —</span>
+  <span class="feed-agg" id="fdAgg">AGG · —</span>
+  <span class="feed-upd" id="fdUpd">UPD · --:--:--</span>
 </div>
 
 <section id="overviewSection">
@@ -605,8 +629,8 @@ body{
 </section>
 
 <div class="sec glass" id="kalshiSection">
-  <div class="tm-row"><span class="stl" style="margin:0">KALSHI 15-MIN ROUND</span><span class="tm-val" id="tmVal">--:--</span></div>
-  <div class="tm-bar-w"><div class="tm-bar" id="tmBar" style="width:0%"></div></div>
+  <div class="tm-row"><span class="stl stl-compact">KALSHI 15-MIN ROUND</span><span class="tm-val" id="tmVal">--:--</span></div>
+  <div class="tm-bar-w"><div class="tm-bar tm-bar-init" id="tmBar"></div></div>
   <div class="tm-row"><span class="tm-phase" id="tmPhase">--</span><span class="tm-strike" id="tmStrike">Strike: --</span></div>
 </div>
 
@@ -616,7 +640,7 @@ body{
   <div class="sig-dir" id="sigDir">ANALYZING</div>
   <div class="sig-sub" id="sigSub">Collecting market intelligence...</div>
   <div class="conf-row"><span class="conf-lbl">CONFIDENCE</span><span class="conf-pct" id="confPct">--%</span></div>
-  <div class="conf-trk"><div class="conf-fill" id="confFill" style="width:0%"></div></div>
+  <div class="conf-trk"><div class="conf-fill conf-fill-init" id="confFill"></div></div>
   <div class="lock-inner" id="lockInner"></div>
 </div>
 
@@ -628,7 +652,7 @@ body{
     <div class="bet-note" id="betNote">Set bankroll to receive AI bet sizing</div>
     <div class="bet-conv" id="betConv"></div>
     <div class="bet-rationale" id="betRationale"></div>
-    <div class="bet-market-warn" id="betMarketWarn" style="display:none"></div>
+    <div class="bet-market-warn is-hidden" id="betMarketWarn"></div>
   </div>
   <div class="trade-rec hold-rec" id="tradeRec">
     <div class="tr-header">
@@ -641,7 +665,7 @@ body{
     </div>
     <div class="tr-kelly">
       <div class="tr-kelly-item"><div class="tr-kelly-lbl">BIG BET</div><div class="tr-kelly-val" id="trKFull">--</div><div class="tr-kelly-amt" id="trKFullAmt"></div></div>
-      <div class="tr-kelly-item" style="background:rgba(0,232,123,0.06)"><div class="tr-kelly-lbl">SAFER BET ✓</div><div class="tr-kelly-val" id="trKHalf">--</div><div class="tr-kelly-amt" id="trKHalfAmt"></div></div>
+      <div class="tr-kelly-item tr-kelly-safe"><div class="tr-kelly-lbl">SAFER BET ✓</div><div class="tr-kelly-val" id="trKHalf">--</div><div class="tr-kelly-amt" id="trKHalfAmt"></div></div>
       <div class="tr-kelly-item"><div class="tr-kelly-lbl">SMALL BET</div><div class="tr-kelly-val" id="trKQtr">--</div><div class="tr-kelly-amt" id="trKQtrAmt"></div></div>
     </div>
     <div class="tr-reasoning" id="trReasoning">Waiting for market data...</div>
@@ -654,8 +678,8 @@ body{
 <div class="pos-card" id="plannerSection">
   <div class="stl">YOUR POSITION</div>
   <div class="pos-grid">
-    <div class="pos-item"><label>PRICE TARGET ($)</label><input type="number" id="inTarget" placeholder="Auto-detect"></div>
-    <div class="pos-item"><label>BANKROLL ($)</label><input type="number" id="inBank" placeholder="Enter amount"></div>
+    <div class="pos-item"><label for="inTarget">PRICE TARGET ($)</label><input type="number" id="inTarget" placeholder="Auto-detect"></div>
+    <div class="pos-item"><label for="inBank">BANKROLL ($)</label><input type="number" id="inBank" placeholder="Enter amount"></div>
   </div>
   <div class="mode-row">
     <button class="mode-btn" data-m="safe" onclick="setMode('safe')">&#x1F6E1;&#xFE0F; SAFE</button>
@@ -692,23 +716,23 @@ body{
   </div>
   </div>
   <div class="tgt-analysis" id="tgtAnalysis">
-    <div style="display:flex;justify-content:space-between;align-items:center;">
+    <div class="tgt-row">
       <div class="stl">Deep-analyze (15-minute round)</div>
-      <button id="deepAnalyzeBtn" style="font-size:10px;padding:4px 10px;border-radius:8px;border:1px solid var(--glass-border);background:var(--glass);color:var(--t2);cursor:pointer;">Deep-analyze</button>
+      <button id="deepAnalyzeBtn" class="deep-analyze-btn">Deep-analyze</button>
     </div>
-    <div style="margin-top:6px">
-      <table style="width:100%;font-size:10px;border-collapse:collapse;margin-bottom:6px;">
-        <tr style="background:rgba(30,40,65,0.12)"><th style="text-align:left;padding:2px 4px;">Question</th><th style="text-align:left;padding:2px 4px;">Answer</th><th style="text-align:right;padding:2px 4px;">Confidence</th><th style="text-align:left;padding:2px 4px;">Reasoning</th></tr>
+    <div class="tgt-body">
+      <table class="tgt-table">
+        <tr class="tgt-head"><th class="tgt-cell">Question</th><th class="tgt-cell">Answer</th><th class="tgt-cell-right">Confidence</th><th class="tgt-cell">Reasoning</th></tr>
         <tr>
-          <td style="padding:2px 4px;">End-of-round price vs. target</td>
-          <td style="padding:2px 4px;" id="tgtDir">--</td>
-          <td style="padding:2px 4px;text-align:right;" id="tgtProb"></td>
-          <td style="padding:2px 4px;" id="tgtRationaleCell"></td>
+          <td class="tgt-cell">End-of-round price vs. target</td>
+          <td class="tgt-cell" id="tgtDir">--</td>
+          <td class="tgt-cell-right" id="tgtProb"></td>
+          <td class="tgt-cell" id="tgtRationaleCell"></td>
         </tr>
       </table>
       <div class="tgt-conf-tag" id="tgtConfTag"></div>
       <div class="tgt-rationale" id="tgtRationale"></div>
-      <div id="tgtWarning" style="font-size:9px;color:var(--o);margin-top:4px;">This is a predictive bet, not a certainty. Only bet what you can afford to lose.</div>
+      <div id="tgtWarning" class="tgt-warning">This is a predictive bet, not a certainty. Only bet what you can afford to lose.</div>
     </div>
   </div>
 </div>
@@ -737,7 +761,7 @@ body{
   <div class="stl">TECHNICAL INDICATORS</div>
   <div class="ind-grid">
     <div class="ind"><div class="ind-l">EMA CROSS</div><div class="ind-v" id="iEma">--</div><div class="ind-s" id="iEmaSub">--</div></div>
-    <div class="ind"><div class="ind-l">RSI (14)</div><div class="ind-v" id="iRsi">--</div><div class="ind-s" id="iRsiSub">--</div><div class="ind-bar"><div class="ind-fill" id="iRsiFill" style="width:50%"></div></div></div>
+    <div class="ind"><div class="ind-l">RSI (14)</div><div class="ind-v" id="iRsi">--</div><div class="ind-s" id="iRsiSub">--</div><div class="ind-bar"><div class="ind-fill ind-fill-default" id="iRsiFill"></div></div></div>
     <div class="ind"><div class="ind-l">MACD</div><div class="ind-v" id="iMacd">--</div><div class="ind-s" id="iMacdSub">--</div></div>
     <div class="ind"><div class="ind-l">BOLLINGER</div><div class="ind-v" id="iBoll">--</div><div class="ind-s" id="iBollSub">--</div></div>
     <div class="ind"><div class="ind-l">STOCH RSI</div><div class="ind-v" id="iStoch">--</div><div class="ind-s" id="iStochSub">--</div></div>
@@ -753,7 +777,7 @@ body{
 
 <div class="sec glass">
   <div class="stl">ORDER BOOK DEPTH</div>
-  <div id="obDiv"><div style="text-align:center;font-size:10px;color:var(--t4)">Loading...</div></div>
+  <div id="obDiv"><div class="ob-loading">Loading...</div></div>
 </div>
 </div>
 
@@ -761,7 +785,7 @@ body{
 </main>
 </div>
 
-<nav class="mobile-nav" id="mobileNav">
+<nav class="mobile-nav" id="mobileNav" aria-label="Mobile sections">
   <button class="mobile-nav-btn active" data-go="overviewSection" type="button">Overview</button>
   <button class="mobile-nav-btn" data-go="kalshiSection" type="button">Kalshi</button>
   <button class="mobile-nav-btn" data-go="consensusSection" type="button">Consensus</button>
@@ -2780,10 +2804,15 @@ function render(){
   for(var di=0;di<5;di++){
     var filled=di<S.betConviction;
     var dc=filled?(S.betStableDir==='ABOVE'?CL.g:S.betStableDir==='BELOW'?CL.r:CL.o):'rgba(255,255,255,0.12)';
-    dotHTML+='<div class="bet-conv-dot" style="background:'+dc+';box-shadow:'+(filled?'0 0 6px '+dc:'none')+'"></div>'
+    dotHTML+='<div class="bet-conv-dot" data-bg="'+dc+'" data-glow="'+(filled?('0 0 6px '+dc):'none')+'"></div>'
   }
   dotHTML+='<span class="bet-conv-lbl">'+S.betConviction+'/5</span>';
   convEl.innerHTML=dotHTML;
+  var convDots=convEl.querySelectorAll('.bet-conv-dot');
+  for(var cdi=0;cdi<convDots.length;cdi++){
+    convDots[cdi].style.background=convDots[cdi].dataset.bg||'transparent';
+    convDots[cdi].style.boxShadow=convDots[cdi].dataset.glow||'none';
+  }
 
   // Session stats
   var wr=S.risk.sessionBets>0?Math.round(S.risk.sessionWins/S.risk.sessionBets*100):0;
@@ -3030,12 +3059,16 @@ function render(){
     for(var i=0;i<ob.asks.length;i++)if(ob.asks[i].sz>mxSz)mxSz=ob.asks[i].sz;
     for(var i=0;i<ob.bids.length;i++)if(ob.bids[i].sz>mxSz)mxSz=ob.bids[i].sz;
     var oh='',asks=ob.asks.slice(0,5).reverse();
-    for(var i=0;i<asks.length;i++){var w=(asks[i].sz/mxSz)*100;oh+='<div class="ob-r ask"><div class="br" style="width:'+w+'%"></div><span class="pr">'+asks[i].pr.toFixed(2)+'</span><span class="sz">'+asks[i].sz.toFixed(5)+'</span></div>'}
+    for(var i=0;i<asks.length;i++){var w=(asks[i].sz/mxSz)*100;oh+='<div class="ob-r ask"><div class="br" data-w="'+w+'"></div><span class="pr">'+asks[i].pr.toFixed(2)+'</span><span class="sz">'+asks[i].sz.toFixed(5)+'</span></div>'}
     var spread=ob.asks.length&&ob.bids.length?(ob.asks[0].pr-ob.bids[0].pr).toFixed(2):'--';
     oh+='<div class="ob-sp">SPREAD $'+spread+' \u00B7 IMB '+(ob.imb*100).toFixed(1)+'%</div>';
     var bids=ob.bids.slice(0,5);
-    for(var i=0;i<bids.length;i++){var w=(bids[i].sz/mxSz)*100;oh+='<div class="ob-r bid"><div class="br" style="width:'+w+'%"></div><span class="pr">'+bids[i].pr.toFixed(2)+'</span><span class="sz">'+bids[i].sz.toFixed(5)+'</span></div>'}
+    for(var i=0;i<bids.length;i++){var w=(bids[i].sz/mxSz)*100;oh+='<div class="ob-r bid"><div class="br" data-w="'+w+'"></div><span class="pr">'+bids[i].pr.toFixed(2)+'</span><span class="sz">'+bids[i].sz.toFixed(5)+'</span></div>'}
     $('obDiv').innerHTML=oh
+    var obBars=$('obDiv').querySelectorAll('.br[data-w]');
+    for(var obi=0;obi<obBars.length;obi++){
+      obBars[obi].style.width=obBars[obi].dataset.w+'%';
+    }
   }
 
   S.lastPrice=p

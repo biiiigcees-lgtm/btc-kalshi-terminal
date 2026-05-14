@@ -1,0 +1,14 @@
+{
+  "name": "worker-signal",
+  "private": true,
+  "version": "0.1.0",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "ts-node src/index.ts"
+  },
+  "dependencies": {
+    "@alpha/contracts": "workspace:*",
+    "@alpha/core": "workspace:*",
+    "@alpha/redis": "workspace:*"
+  }
+}
